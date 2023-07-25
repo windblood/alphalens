@@ -165,6 +165,10 @@ def quantize_factor(factor_data,
 
     factor_quantile = factor_data.groupby(grouper)['factor'] \
         .apply(quantile_calc, quantiles, bins, zero_aware, no_raise)
+
+    while factor_quantile.index.nlevels > 2:
+        factor_quantile.index = factor_quantile.index.droplevel(0)
+
     factor_quantile.name = 'factor_quantile'
 
     return factor_quantile.dropna()

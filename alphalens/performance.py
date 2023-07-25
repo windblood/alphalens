@@ -202,6 +202,9 @@ def factor_weights(factor_data,
     if group_adjust:
         weights = weights.groupby(level='date').apply(to_weights, False, False)
 
+    while weights.index.nlevels > 2:
+        weights.index = weights.index.droplevel(0)
+
     return weights
 
 
