@@ -183,6 +183,7 @@ def plot_information_table(ic_data):
 
 
 def plot_quantile_statistics_table(factor_data):
+    factor_data = factor_data.select_dtypes(exclude='category')
     quantile_stats = factor_data.groupby('factor_quantile') \
         .agg(['min', 'max', 'mean', 'std', 'count'])['factor']
     quantile_stats['count %'] = quantile_stats['count'] \

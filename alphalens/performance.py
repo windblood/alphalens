@@ -196,14 +196,11 @@ def factor_weights(factor_data,
     if group_adjust:
         grouper.append('group')
 
-    weights = factor_data.groupby(grouper)['factor'] \
+    weights = factor_data.groupby(grouper, group_keys=False)['factor'] \
         .apply(to_weights, demeaned, equal_weight)
 
     if group_adjust:
-        weights = weights.groupby(level='date').apply(to_weights, False, False)
-
-    while weights.index.nlevels > 2:
-        weights.index = weights.index.droplevel(0)
+        weights = weights.groupby(level='date', group_keys=False).apply(to_weights, False, False)
 
     return weights
 
@@ -706,11 +703,11 @@ def common_start_returns(factor,
         ending_index = min(day_zero_index + after + 1,
                            len(returns.index))
 
-        equities_slice = set(equities)
+        equities_slice = list(set(equities))
         if demean_by is not None:
             demean_equities = demean_by.loc[timestamp] \
                 .index.get_level_values('asset')
-            equities_slice |= set(demean_equities)
+            equities_slice = list(set(equities_slice) | set(demean_equities))
 
         series = returns.loc[returns.index[starting_index:ending_index],
                              equities_slice]

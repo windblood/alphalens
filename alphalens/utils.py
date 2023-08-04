@@ -163,11 +163,8 @@ def quantize_factor(factor_data,
     if by_group:
         grouper.append('group')
 
-    factor_quantile = factor_data.groupby(grouper)['factor'] \
+    factor_quantile = factor_data.groupby(grouper, group_keys=False)['factor'] \
         .apply(quantile_calc, quantiles, bins, zero_aware, no_raise)
-
-    while factor_quantile.index.nlevels > 2:
-        factor_quantile.index = factor_quantile.index.droplevel(0)
 
     factor_quantile.name = 'factor_quantile'
 
@@ -320,7 +317,7 @@ def compute_forward_returns(factor,
             period_len = diff_custom_calendar_timedeltas(start, end, freq)
             days_diffs.append(period_len.components.days)
 
-        delta_days = period_len.components.days - mode(days_diffs).mode[0]
+        delta_days = period_len.components.days - mode(days_diffs, keepdims=True).mode[0]
         period_len -= pd.Timedelta(days=delta_days)
         label = timedelta_to_string(period_len)
 
@@ -414,7 +411,7 @@ def demean_forward_returns(factor_data, grouper=None):
         grouper = factor_data.index.get_level_values('date')
 
     cols = get_forward_returns_columns(factor_data.columns)
-    factor_data[cols] = factor_data.groupby(grouper)[cols] \
+    factor_data[cols] = factor_data.groupby(grouper, group_keys=False)[cols] \
         .transform(lambda x: x - x.mean())
 
     return factor_data
@@ -626,7 +623,9 @@ def get_clean_factor(factor,
             groupby = pd.Series(index=groupby.index,
                                 data=sn[groupby.values].values)
 
-        merged_data['group'] = groupby.astype('category')
+        # merged_data['group'] = groupby.astype('category')
+        cat_dtype = pd.CategoricalDtype(categories=sorted(groupby.unique()), ordered=True)
+        merged_data['group'] = groupby.astype(cat_dtype)
 
     merged_data = merged_data.dropna()
 
