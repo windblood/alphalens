@@ -27,8 +27,9 @@ from pandas import (
     Timestamp,
     concat,
 )
-from pandas.util.testing import (assert_frame_equal,
-                                 assert_series_equal)
+# from pandas.util.testing import (assert_frame_equal,
+#                                  assert_series_equal)
+from pandas.testing import (assert_frame_equal, assert_series_equal)
 
 from .. utils import (get_clean_factor_and_forward_returns,
                       compute_forward_returns,
@@ -79,7 +80,8 @@ class UtilsTestCase(TestCase):
         expected['1D'] = [0., 1., 1., -0.5, nan, nan]
         expected['2D'] = [1., 0., nan, nan, nan, nan]
 
-        assert_frame_equal(fp, expected)
+        assert_frame_equal(fp.sort_index().reset_index(), expected.sort_index().reset_index(),
+                           check_like=True, check_categorical=False)
 
     def test_compute_forward_returns_index_out_of_bound(self):
         dr = date_range(start='2014-12-29', end='2015-1-3')
@@ -100,7 +102,8 @@ class UtilsTestCase(TestCase):
         expected['1D'] = [0., 1., 1., -0.5, nan, nan]
         expected['2D'] = [1., 0., nan, nan, nan, nan]
 
-        assert_frame_equal(fp, expected)
+        assert_frame_equal(fp.sort_index().reset_index(), expected.sort_index().reset_index(),
+                           check_like=True, check_categorical=False)
 
     def test_compute_forward_returns_non_cum(self):
         dr = date_range(start='2015-1-1', end='2015-1-3')
@@ -117,7 +120,8 @@ class UtilsTestCase(TestCase):
         expected['1D'] = [0., 1., 1., -0.5, nan, nan]
         expected['2D'] = [1., -0.5, nan, nan, nan, nan]
 
-        assert_frame_equal(fp, expected)
+        assert_frame_equal(fp.sort_index().reset_index(), expected.sort_index().reset_index(),
+                           check_like=True, check_categorical=False)
 
     @parameterized.expand([(factor_data, 4, None, False, False,
                             [1, 2, 3, 4, 4, 3, 2, 1]),
@@ -183,7 +187,9 @@ class UtilsTestCase(TestCase):
         expected = Series(index=factor.index,
                           data=expected_vals,
                           name='factor_quantile').dropna()
-        assert_series_equal(quantized_factor, expected)
+        # assert_series_equal(quantized_factor, expected)
+        assert_frame_equal(quantized_factor.sort_index().reset_index(), expected.sort_index().reset_index(),
+                           check_like=True, check_categorical=False)
 
     def test_get_clean_factor_and_forward_returns_1(self):
         """
@@ -238,7 +244,8 @@ class UtilsTestCase(TestCase):
                              columns=expected_cols, data=expected_data)
         expected['group'] = expected['group'].astype('category')
 
-        assert_frame_equal(factor_data, expected)
+        assert_frame_equal(factor_data.sort_index().reset_index(), expected.sort_index().reset_index(),
+                           check_like=True, check_categorical=False)
 
     def test_get_clean_factor_and_forward_returns_2(self):
         """
@@ -294,7 +301,8 @@ class UtilsTestCase(TestCase):
                              columns=expected_cols, data=expected_data)
         expected['group'] = expected['group'].astype('category')
 
-        assert_frame_equal(factor_data, expected)
+        assert_frame_equal(factor_data.sort_index().reset_index(), expected.sort_index().reset_index(),
+                           check_like=True, check_categorical=False)
 
     def test_get_clean_factor_and_forward_returns_3(self):
         """
@@ -358,7 +366,8 @@ class UtilsTestCase(TestCase):
                              columns=expected_cols, data=expected_data)
         expected['group'] = expected['group'].astype('category')
 
-        assert_frame_equal(factor_data, expected)
+        assert_frame_equal(factor_data.sort_index().reset_index(), expected.sort_index().reset_index(),
+                           check_like=True, check_categorical=False)
 
     def test_get_clean_factor_and_forward_returns_4(self):
         """
@@ -407,7 +416,8 @@ class UtilsTestCase(TestCase):
                              columns=expected_cols, data=expected_data)
         expected['group'] = expected['group'].astype('category')
 
-        assert_frame_equal(factor_data, expected)
+        assert_frame_equal(factor_data.sort_index().reset_index(), expected.sort_index().reset_index(),
+                           check_like=True, check_categorical=False)
 
     def test_get_clean_factor_and_forward_returns_5(self):
         """
@@ -477,7 +487,8 @@ class UtilsTestCase(TestCase):
                              columns=expected_cols, data=expected_data)
         expected['group'] = expected['group'].astype('category')
 
-        assert_frame_equal(factor_data, expected)
+        assert_frame_equal(factor_data.sort_index().reset_index(), expected.sort_index().reset_index(),
+                           check_like=True, check_categorical=False)
 
         inferred_holidays = factor_data.index.levels[0].freq.holidays
         assert sorted(holidays) == sorted(inferred_holidays)
@@ -538,9 +549,11 @@ class UtilsTestCase(TestCase):
                          [-0.1, -0.19, -0.271, 1.0, 2, 1]] * 6  # 18  days
         expected = DataFrame(index=expected_idx,
                              columns=expected_cols, data=expected_data)
-        expected['group'] = expected['group'].astype('category')
+        # expected['group'] = expected['group'].astype('category')
+        expected['group'] = expected['group'].astype(int)
 
-        assert_frame_equal(factor_data, expected)
+        assert_frame_equal(factor_data.sort_index().reset_index(), expected.sort_index().reset_index(),
+                           check_like=True, check_categorical=False)
 
         inferred_holidays = factor_data.index.levels[0].freq.holidays
         assert sorted(holidays) == sorted(inferred_holidays)

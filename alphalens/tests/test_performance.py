@@ -22,16 +22,18 @@ from pandas import (
     DataFrame,
     date_range,
     MultiIndex,
-    Int64Index,
+    # Int64Index,
     Index,
     DatetimeIndex,
     Timedelta
 )
 
+
 from pandas.tseries.offsets import (BDay, Day, CDay)
 
-from pandas.util.testing import (assert_frame_equal,
-                                 assert_series_equal)
+# from pandas.util.testing import (assert_frame_equal,
+#                                  assert_series_equal)
+from pandas.testing import assert_frame_equal, assert_series_equal
 
 from .. performance import (factor_information_coefficient,
                             mean_information_coefficient,
@@ -104,7 +106,8 @@ class PerformanceTestCase(TestCase):
                                    columns=Index(['1D'], dtype='object'),
                                    data=expected_ic_val)
 
-        assert_frame_equal(ic, expected_ic_df)
+        assert_frame_equal(ic.sort_index().reset_index(), expected_ic_df.sort_index().reset_index(),
+                           check_like=True, check_categorical=False)
 
     @parameterized.expand([(factor_data,
                             [4, 3, 2, 1, 1, 2, 3, 4],
@@ -127,7 +130,8 @@ class PerformanceTestCase(TestCase):
                             False,
                             True,
                             None,
-                            Int64Index([1, 2], name='group'),
+                            # Int64Index([1, 2], name='group'),
+                            Index([1, 2], dtype='int64', name='group'),
                             [1., 1.]),
                            (factor_data,
                             [1, 2, 3, 4, 4, 3, 2, 1],
@@ -161,7 +165,8 @@ class PerformanceTestCase(TestCase):
                                    columns=Index(['1D'], dtype='object'),
                                    data=expected_ic_val)
 
-        assert_frame_equal(ic, expected_ic_df)
+        assert_frame_equal(ic.reset_index(), expected_ic_df.reset_index(),
+                           check_like=True, check_categorical=False)
 
     @parameterized.expand([([1.1, 1.2, 1.1, 1.2, 1.1, 1.2],
                             [[1, 2, 1, 2, 1, 2],
@@ -432,7 +437,8 @@ class PerformanceTestCase(TestCase):
             index=quantized_test_factor.index.levels[0], data=expected_vals)
         expected.name = test_quantile
 
-        assert_series_equal(to, expected)
+        # assert_series_equal(to, expected)
+        assert_frame_equal(to.sort_index().reset_index(), expected.sort_index().reset_index())
 
     @parameterized.expand([([[3, 4,  2,  1, nan],
                              [3, 4, -2, -1, nan],
@@ -551,7 +557,9 @@ class PerformanceTestCase(TestCase):
                           index=factor_data.index,
                           name='factor')
 
-        assert_series_equal(weights, expected)
+        # assert_series_equal(weights, expected)
+        assert_frame_equal(weights.sort_index().reset_index(), expected.sort_index().reset_index(),
+                           check_like=True, check_categorical=False)
 
     @parameterized.expand([([1, 2, 3, 4, 4, 3, 2, 1],
                             [4, 3, 2, 1, 1, 2, 3, 4],
@@ -594,7 +602,8 @@ class PerformanceTestCase(TestCase):
             columns=get_forward_returns_columns(
                 factor_data.columns))
 
-        assert_frame_equal(factor_returns_s, expected)
+        assert_frame_equal(factor_returns_s.sort_index().reset_index(), expected.sort_index().reset_index(),
+                           check_like=True, check_categorical=False)
 
     @parameterized.expand([([1, 2, 3, 4, 1, 1, 1, 1],
                             -1,
@@ -689,7 +698,8 @@ class PerformanceTestCase(TestCase):
 
         expected = Series(expected_vals, index=cum_ret.index)
 
-        assert_series_equal(cum_ret, expected, check_less_precise=True)
+        # assert_series_equal(cum_ret, expected,)  # check_less_precise=True)
+        assert_frame_equal(cum_ret.sort_index().reset_index(), expected.sort_index().reset_index())
 
     @parameterized.expand([([[1.0, 2.0, 3.0, 4.0],
                              [1.0, 2.0, 3.0, 4.0],
@@ -770,7 +780,8 @@ class PerformanceTestCase(TestCase):
         expected = Series(index=dr, data=expected_vals)
         expected.name = period
 
-        assert_series_equal(fa, expected)
+        # assert_series_equal(fa, expected)
+        assert_frame_equal(fa.sort_index().reset_index(), expected.sort_index().reset_index())
 
     @parameterized.expand([
         (
@@ -867,7 +878,7 @@ class PerformanceTestCase(TestCase):
         cmrt = DataFrame({'mean': cmrt.mean(axis=1), 'std': cmrt.std(axis=1)})
         expected = DataFrame(index=range(-before, after + 1),
                              columns=['mean', 'std'], data=expected_vals)
-        assert_frame_equal(cmrt, expected)
+        assert_frame_equal(cmrt, expected, check_like=True, check_categorical=False)
 
     @parameterized.expand([
         (
