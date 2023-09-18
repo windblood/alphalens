@@ -255,6 +255,57 @@ def factor_returns(factor_data,
     return returns
 
 
+def factor_returns_Fama_Macbeth(factor_data):
+    """ TODO
+    Computes period wise returns for portfolio using Fama-Macbeth regression.
+
+    Parameters
+    ----------
+    factor_data : pd.DataFrame - MultiIndex
+        A MultiIndex DataFrame indexed by date (level 0) and asset (level 1),
+        containing the values for a single alpha factor, backward returns for
+        each period.
+        - See full explanation in utils.get_clean_factor_and_forward_returns
+
+    Returns
+    -------
+    returns : pd.DataFrame
+        Period wise factor returns
+    """
+    returns = pd.DataFrame()
+    tvalues = pd.DataFrame()
+    dates = factor_data.index.get_level_values(level='date').unique()
+    returns_columns = utils.get_forward_returns_columns(factor_data)
+    factor_columns = [x for x in factor_data.columns if x not in returns_columns]
+    for dt in dates:
+        tmp_factor = factor_data.loc[dt]
+        X = tmp_factor[factor_columns]
+        y = tmp_factor[returns_columns]
+        # 当前收益对因子载荷做回归
+        # 回归系数即为因子当期收益率
+        reg_fit = OLS(y, X).fit()
+        try:
+            alpha, beta = reg_fit.params
+            t_alpha, t_beta = reg_fit.tvalues
+        except ValueError:
+            returns.loc[dt, factor_columns] = np.nan
+            tvalues.loc[dt, factor_columns] = np.nan
+        else:
+            returns.loc[dt, factor_columns] = beta
+            tvalues.loc[dt, factor_columns] = t_beta
+
+    alpha_beta = pd.DataFrame()
+    alpha_beta['Ann. return'] = returns.mean() * 252
+    alpha_beta['Ann. vol'] = returns.std() * 252**0.5
+    alpha_beta['Sharpe Ratio'] = alpha_beta['Ann. return'] / alpha_beta['Ann. vol']
+    alpha_beta['t values'] = tvalues
+    alpha_beta['t mean'] = tvalues.mean()
+    alpha_beta['t mean abs'] = tvalues.abs().mean()
+    alpha_beta['t>2 percent'] = np.sum(tvalues.abs() > 2, axis=1) / len(tvalues)
+
+    return returns, tvalues, alpha_beta
+
+
 def factor_alpha_beta(factor_data,
                       returns=None,
                       demeaned=True,

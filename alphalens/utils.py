@@ -345,51 +345,12 @@ def compute_forward_returns(factor,
     return df
 
 
-def backshift_returns(returns, N):
-    """Shift a multi-indexed returns backwards by N observations in
-    the first level.
-
-    This can be used to convert backward-looking returns into a
-    forward-returns series.
-    """
-    if not isinstance(returns, (pd.Series, pd.DataFrame)):
-        raise ValueError('returns should be pandas Series or DataFrame')
-    ix = returns.index
-    dates, sids = ix.levels
-    date_codes, sid_codes = map(np.array, ix.codes)
-
-    # Output date labels will contain the all but the last N dates.
-    new_dates = dates[:-N]
-
-    # Output data will remove the first M rows, where M is the index of the
-    # last record with one of the first N dates.
-    cutoff = date_codes.searchsorted(N)
-    new_date_codes = date_codes[cutoff:] - N
-    new_sid_codes = sid_codes[cutoff:]
-    new_values = returns.values[cutoff:]
-
-    assert new_date_codes[0] == 0
-
-    new_index = pd.MultiIndex(
-        levels=[new_dates, sids],
-        codes=[new_date_codes, new_sid_codes],
-        sortorder=1,
-        names=ix.names,
-    )
-    if isinstance(returns, pd.Series):
-        shifted_returns = pd.Series(data=new_values, index=new_index, name=returns.name)
-    else:
-        shifted_returns = pd.DataFrame(data=new_values, index=new_index, columns=returns.columns)
-
-    return shifted_returns
-
-
 def compute_backward_returns(factor,
-                            prices,
-                            periods=(1, 5, 10),
-                            filter_zscore=None,
-                            cumulative_returns=True):
-    """
+                             prices,
+                             periods=(1, 5, 10),
+                             filter_zscore=None,
+                             cumulative_returns=True):
+    """ TODO
     Finds the N period backward returns (as percent change) for each asset
     provided.
 
@@ -429,7 +390,108 @@ def compute_backward_returns(factor,
         will be set to a trading calendar (pandas DateOffset) inferred
         from the input data (see infer_trading_calendar for more details).
     """
-    pass
+    factor_dateindex = factor.index.levels[0]
+    if factor_dateindex.tz != prices.index.tz:
+        raise NonMatchingTimezoneError("The timezone of 'factor' is not the "
+                                       "same as the timezone of 'prices'. See "
+                                       "the pandas methods tz_localize and "
+                                       "tz_convert.")
+
+    freq = infer_trading_calendar(factor_dateindex, prices.index)
+    factor_dateindex = factor_dateindex.intersection(prices.index)
+
+    if len(factor_dateindex) == 0:
+        raise ValueError("Factor and prices indices don't match: make sure "
+                         "they have the same convention in terms of datetimes "
+                         "and symbol-names")
+
+    prices = prices.filter(items=factor.index.levels[1])
+
+    raw_values_dict = {}
+    column_list = []
+
+    for period in sorted(periods):
+        returns = prices.pct_change(period) if cumulative_returns else prices.pct_change()
+        returns = returns.reindex(factor_dateindex)
+
+        if filter_zscore is not None:
+            mask = abs(returns - returns.mean()) > (filter_zscore * returns.std())
+            returns[mask] = np.nan
+
+        days_diffs = []
+        for i in range(30):
+            if i >= len(returns.index):
+                break
+            p_idx = prices.index.get_loc(returns.index[i])
+            if p_idx is None or p_idx < 0 or (
+                    p_idx + period) >= len(prices.index):
+                continue
+            start = prices.index[p_idx]
+            end = prices.index[p_idx + period]
+            period_len = diff_custom_calendar_timedeltas(start, end, freq)
+            days_diffs.append(period_len.components.days)
+
+        delta_days = period_len.components.days - mode(days_diffs, keepdims=True).mode[0]
+        period_len -= pd.Timedelta(days=delta_days)
+        label = timedelta_to_string(period_len)
+
+        column_list.append(label)
+
+        raw_values_dict[label] = np.concatenate(returns.values)
+
+    df = pd.DataFrame.from_dict(raw_values_dict)
+    df.set_index(
+        pd.MultiIndex.from_product(
+            [factor_dateindex, prices.columns],
+            names=['date', 'asset']
+        ),
+        inplace=True
+    )
+    df = df.reindex(factor.index)
+    df = df[column_list]
+    df.index.levels[0].freq = freq
+    df.index.set_names(['date', 'asset'], inplace=True)
+
+    return df
+
+
+def backshift_returns(returns, N):
+    """Shift a multi-indexed returns backwards by N observations in
+    the first level.
+
+    This can be used to convert backward-looking returns into a
+    forward-returns series.
+    """
+    if not isinstance(returns, (pd.Series, pd.DataFrame)):
+        raise ValueError('returns should be pandas Series or DataFrame')
+    ix = returns.index
+    dates, sids = ix.levels
+    date_codes, sid_codes = map(np.array, ix.codes)
+
+    # Output date labels will contain the all but the last N dates.
+    new_dates = dates[:-N]
+
+    # Output data will remove the first M rows, where M is the index of the
+    # last record with one of the first N dates.
+    cutoff = date_codes.searchsorted(N)
+    new_date_codes = date_codes[cutoff:] - N
+    new_sid_codes = sid_codes[cutoff:]
+    new_values = returns.values[cutoff:]
+
+    assert new_date_codes[0] == 0
+
+    new_index = pd.MultiIndex(
+        levels=[new_dates, sids],
+        codes=[new_date_codes, new_sid_codes],
+        sortorder=1,
+        names=ix.names,
+    )
+    if isinstance(returns, pd.Series):
+        shifted_returns = pd.Series(data=new_values, index=new_index, name=returns.name)
+    else:
+        shifted_returns = pd.DataFrame(data=new_values, index=new_index, columns=returns.columns)
+
+    return shifted_returns
 
 
 def demean_forward_returns(factor_data, grouper=None):
@@ -1110,7 +1172,7 @@ def _single_orthogonal_factors(factors, method='Schimidt'):
         # 矩阵算法仅适用于标准化后的factors
         M = (factors.shape[0] - 1) * np.cov(factors.T)
         eigen_values, U = np.linalg.eig(M)
-        D = np.diag(eigen_values**(-0.5))
+        D = np.diag(eigen_values ** (-0.5))
         if method == 'Canonical':
             S = U @ D
             new_factors = factors @ S
