@@ -354,7 +354,7 @@ def backshift_returns_series(series, N):
     """
     ix = series.index
     dates, sids = ix.levels
-    date_labels, sid_labels = map(np.array, ix.labels)
+    date_labels, sid_labels = map(np.array, ix.codes)
 
     # Output date labels will contain the all but the last N dates.
     new_dates = dates[:-N]
@@ -376,6 +376,55 @@ def backshift_returns_series(series, N):
     )
 
     return pd.Series(data=new_values, index=new_index)
+
+
+def compute_backward_returns(factor,
+                            prices,
+                            periods=(1, 5, 10),
+                            filter_zscore=None,
+                            cumulative_returns=True):
+    """
+    Finds the N period backward returns (as percent change) for each asset
+    provided.
+
+    Parameters
+    ----------
+    factor : pd.Series - MultiIndex
+        A MultiIndex Series indexed by timestamp (level 0) and asset
+        (level 1), containing the values for a single alpha factor.
+
+        - See full explanation in utils.get_clean_factor_and_forward_returns
+
+    prices : pd.DataFrame
+        Pricing data to use in forward price calculation.
+        Assets as columns, dates as index. Pricing data must
+        span the factor analysis time period plus an additional buffer window
+        that is greater than the maximum number of expected periods
+        in the forward returns calculations.
+    periods : sequence[int]
+        periods to compute forward returns on.
+    filter_zscore : int or float, optional
+        Sets forward returns greater than X standard deviations
+        from the the mean to nan. Set it to 'None' to avoid filtering.
+        Caution: this outlier filtering incorporates lookahead bias.
+    cumulative_returns : bool, optional
+        If True, forward returns columns will contain cumulative returns.
+        Setting this to False is useful if you want to analyze how predictive
+        a factor is for a single forward day.
+
+    Returns
+    -------
+    forward_returns : pd.DataFrame - MultiIndex
+        A MultiIndex DataFrame indexed by timestamp (level 0) and asset
+        (level 1), containing the forward returns for assets.
+        Forward returns column names follow the format accepted by
+        pd.Timedelta (e.g. '1D', '30m', '3h15m', '1D1h', etc).
+        'date' index freq property (forward_returns.index.levels[0].freq)
+        will be set to a trading calendar (pandas DateOffset) inferred
+        from the input data (see infer_trading_calendar for more details).
+    """
+
+    pass
 
 
 def demean_forward_returns(factor_data, grouper=None):
