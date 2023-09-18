@@ -345,37 +345,43 @@ def compute_forward_returns(factor,
     return df
 
 
-def backshift_returns_series(series, N):
-    """Shift a multi-indexed series backwards by N observations in
+def backshift_returns(returns, N):
+    """Shift a multi-indexed returns backwards by N observations in
     the first level.
 
     This can be used to convert backward-looking returns into a
     forward-returns series.
     """
-    ix = series.index
+    if not isinstance(returns, (pd.Series, pd.DataFrame)):
+        raise ValueError('returns should be pandas Series or DataFrame')
+    ix = returns.index
     dates, sids = ix.levels
-    date_labels, sid_labels = map(np.array, ix.codes)
+    date_codes, sid_codes = map(np.array, ix.codes)
 
     # Output date labels will contain the all but the last N dates.
     new_dates = dates[:-N]
 
     # Output data will remove the first M rows, where M is the index of the
     # last record with one of the first N dates.
-    cutoff = date_labels.searchsorted(N)
-    new_date_labels = date_labels[cutoff:] - N
-    new_sid_labels = sid_labels[cutoff:]
-    new_values = series.values[cutoff:]
+    cutoff = date_codes.searchsorted(N)
+    new_date_codes = date_codes[cutoff:] - N
+    new_sid_codes = sid_codes[cutoff:]
+    new_values = returns.values[cutoff:]
 
-    assert new_date_labels[0] == 0
+    assert new_date_codes[0] == 0
 
     new_index = pd.MultiIndex(
         levels=[new_dates, sids],
-        labels=[new_date_labels, new_sid_labels],
+        codes=[new_date_codes, new_sid_codes],
         sortorder=1,
         names=ix.names,
     )
+    if isinstance(returns, pd.Series):
+        shifted_returns = pd.Series(data=new_values, index=new_index, name=returns.name)
+    else:
+        shifted_returns = pd.DataFrame(data=new_values, index=new_index, columns=returns.columns)
 
-    return pd.Series(data=new_values, index=new_index)
+    return shifted_returns
 
 
 def compute_backward_returns(factor,
@@ -423,7 +429,6 @@ def compute_backward_returns(factor,
         will be set to a trading calendar (pandas DateOffset) inferred
         from the input data (see infer_trading_calendar for more details).
     """
-
     pass
 
 
