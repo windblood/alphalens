@@ -292,8 +292,8 @@ def factor_returns_Fama_Macbeth(factor_data, returns_columns='1D', factor_column
         # 回归系数即为因子当期收益率
         reg_fit = OLS(y, X).fit()
         try:
-            alpha, beta = reg_fit.params
-            t_alpha, t_beta = reg_fit.tvalues
+            beta = reg_fit.params[1:]
+            t_beta = reg_fit.tvalues[1:]
             r_squared_adj = reg_fit.rsquared_adj
         except ValueError:
             returns.loc[dt, factor_columns] = np.nan
@@ -304,15 +304,16 @@ def factor_returns_Fama_Macbeth(factor_data, returns_columns='1D', factor_column
             tvalues.loc[dt, factor_columns] = t_beta
             R_squares.loc[dt] = r_squared_adj
 
-    alpha_beta = pd.Series()
-    alpha_beta['Ann. return'] = returns.values.mean() * 252
-    alpha_beta['Ann. vol'] = returns.values.std() * 252**0.5
-    alpha_beta['Sharpe Ratio'] = alpha_beta['Ann. return'] / alpha_beta['Ann. vol']
-    alpha_beta['t mean'] = tvalues.values.mean()
-    alpha_beta['t mean abs'] = tvalues.abs().values.mean()
-    alpha_beta['t>2 percent'] = np.sum(tvalues.abs().values > 2) / len(tvalues)
-    alpha_beta['R squared adj mean'] = R_squares.values.mean()
-    alpha_beta['R squared adj std'] = R_squares.values.std()
+    alpha_beta = pd.DataFrame()
+    freq_adjust = pd.Timedelta('250Days') / pd.Timedelta(returns_columns)
+    alpha_beta.loc['Ann. return', factor_columns] = returns.values.mean(axis=0) * freq_adjust
+    alpha_beta.loc['Ann. vol', factor_columns] = returns.values.std(axis=0) * freq_adjust**0.5
+    alpha_beta.loc['Sharpe Ratio', factor_columns] = returns.values.mean(axis=0) / returns.values.std(axis=0) * freq_adjust**0.5
+    alpha_beta.loc['t mean', factor_columns] = tvalues.values.mean(axis=0)
+    alpha_beta.loc['t mean abs', factor_columns] = tvalues.abs().values.mean(axis=0)
+    alpha_beta.loc['t>2 percent', factor_columns] = np.sum(tvalues.abs().values > 2, axis=0) / len(tvalues)
+    alpha_beta.loc['R squared adj mean', factor_columns] = R_squares.values.mean(axis=0)
+    alpha_beta.loc['R squared adj std', factor_columns] = R_squares.values.std(axis=0)
 
     return returns, tvalues, alpha_beta
 
