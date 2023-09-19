@@ -256,7 +256,7 @@ def factor_returns(factor_data,
 
 
 def factor_returns_Fama_Macbeth(factor_data, returns_columns='1D', factor_columns='factor'):
-    """ TODO
+    """
     Computes period wise returns for portfolio using Fama-Macbeth regression.
 
     Parameters

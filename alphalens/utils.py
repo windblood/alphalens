@@ -350,7 +350,7 @@ def compute_backward_returns(factor,
                              periods=(1, 5, 10),
                              filter_zscore=None,
                              cumulative_returns=True):
-    """ TODO
+    """
     Finds the N period backward returns (as percent change) for each asset
     provided.
 
