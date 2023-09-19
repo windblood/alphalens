@@ -255,7 +255,7 @@ def factor_returns(factor_data,
     return returns
 
 
-def factor_returns_Fama_Macbeth(factor_data):
+def factor_returns_Fama_Macbeth(factor_data, returns_columns='1D', factor_columns='factor'):
     """ TODO
     Computes period wise returns for portfolio using Fama-Macbeth regression.
 
@@ -266,6 +266,8 @@ def factor_returns_Fama_Macbeth(factor_data):
         containing the values for a single alpha factor, backward returns for
         each period.
         - See full explanation in utils.get_clean_factor_and_forward_returns
+    returns_columns: str or list of str, columns name
+    factor_columns: str or list of str, columns name
 
     Returns
     -------
@@ -274,34 +276,43 @@ def factor_returns_Fama_Macbeth(factor_data):
     """
     returns = pd.DataFrame()
     tvalues = pd.DataFrame()
+    R_squares = pd.Series(name='R Squared adj')
     dates = factor_data.index.get_level_values(level='date').unique()
-    returns_columns = utils.get_forward_returns_columns(factor_data)
-    factor_columns = [x for x in factor_data.columns if x not in returns_columns]
+    if returns_columns is None:
+        returns_columns = utils.get_forward_returns_columns(factor_data.columns)
+    if factor_columns is None:
+        factor_columns = [x for x in factor_data.columns if x not in returns_columns]
+
     for dt in dates:
         tmp_factor = factor_data.loc[dt]
-        X = tmp_factor[factor_columns]
-        y = tmp_factor[returns_columns]
+        X = tmp_factor[factor_columns].values
+        X = add_constant(X)
+        y = tmp_factor[returns_columns].values
         # 当前收益对因子载荷做回归
         # 回归系数即为因子当期收益率
         reg_fit = OLS(y, X).fit()
         try:
             alpha, beta = reg_fit.params
             t_alpha, t_beta = reg_fit.tvalues
+            r_squared_adj = reg_fit.rsquared_adj
         except ValueError:
             returns.loc[dt, factor_columns] = np.nan
             tvalues.loc[dt, factor_columns] = np.nan
+            R_squares.loc[dt] = np.nan
         else:
             returns.loc[dt, factor_columns] = beta
             tvalues.loc[dt, factor_columns] = t_beta
+            R_squares.loc[dt] = r_squared_adj
 
-    alpha_beta = pd.DataFrame()
-    alpha_beta['Ann. return'] = returns.mean() * 252
-    alpha_beta['Ann. vol'] = returns.std() * 252**0.5
+    alpha_beta = pd.Series()
+    alpha_beta['Ann. return'] = returns.values.mean() * 252
+    alpha_beta['Ann. vol'] = returns.values.std() * 252**0.5
     alpha_beta['Sharpe Ratio'] = alpha_beta['Ann. return'] / alpha_beta['Ann. vol']
-    alpha_beta['t values'] = tvalues
-    alpha_beta['t mean'] = tvalues.mean()
-    alpha_beta['t mean abs'] = tvalues.abs().mean()
-    alpha_beta['t>2 percent'] = np.sum(tvalues.abs() > 2, axis=1) / len(tvalues)
+    alpha_beta['t mean'] = tvalues.values.mean()
+    alpha_beta['t mean abs'] = tvalues.abs().values.mean()
+    alpha_beta['t>2 percent'] = np.sum(tvalues.abs().values > 2) / len(tvalues)
+    alpha_beta['R squared adj mean'] = R_squares.values.mean()
+    alpha_beta['R squared adj std'] = R_squares.values.std()
 
     return returns, tvalues, alpha_beta
 
