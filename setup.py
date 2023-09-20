@@ -18,6 +18,7 @@ install_reqs = [
     'statsmodels>=0.6.1',
     'IPython>=3.2.3',
     'empyrical>=0.5.0',
+    'sympy',
 ]
 
 extra_reqs = {

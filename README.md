@@ -130,7 +130,7 @@ Example factor courtesy of [ExtractAlpha](https://extractalpha.com/)
 ![](https://github.com/quantopian/alphalens/raw/master/alphalens/examples/sector_tear.png)
 
 ## New functions
-[x] orthogonalization    
-[ ] Fama-Macbeth regression factor return    
-[ ] return analysis based on Fama-Macbeth regression returns    
-[ ] turnover analysis with assets weights    
+- [x] orthogonalization    
+- [x] Fama-Macbeth regression factor return    
+- [x] return analysis based on Fama-Macbeth regression returns    
+- [x] turnover analysis with assets weights    

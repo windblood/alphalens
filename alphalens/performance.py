@@ -702,6 +702,46 @@ def factor_rank_autocorrelation(factor_data, period=1):
     return autocorr
 
 
+def weighted_turnover(factor_data, period=1, demeaned=True, group_adjust=False,
+                      equal_weight=False):
+    """
+    Computes period wise turnover for portfolio weighted by factor
+    values.
+
+    Parameters
+    ----------
+    factor_data : pd.DataFrame - MultiIndex
+        A MultiIndex DataFrame indexed by date (level 0) and asset (level 1),
+        containing the values for a single alpha factor, forward returns for
+        each period, the factor quantile/bin that factor value belongs to, and
+        (optionally) the group the asset belongs to.
+        - See full explanation in utils.get_clean_factor_and_forward_returns
+    period: int, optional
+        Number of days over which to calculate the turnover.
+    demeaned : bool
+        Control how to build factor weights
+        -- see performance.factor_weights for a full explanation
+    group_adjust : bool
+        Control how to build factor weights
+        -- see performance.factor_weights for a full explanation
+    equal_weight : bool, optional
+        Control how to build factor weights
+        -- see performance.factor_weights for a full explanation
+
+    Returns
+    -------
+    turnover : pd.Series
+        Period wise factor turnovers
+    """
+    # weight
+    weights = factor_weights(factor_data, demeaned, group_adjust, equal_weight)
+    index_names = weights.index.names
+    weights = weights.reset_index().pivot(columns=index_names[1], index=index_names[0], values=weights.name)
+    # turnover
+    turnover = weights.fillna(value=0).diff(period).abs().sum(axis=1)
+    return turnover
+
+
 def common_start_returns(factor,
                          returns,
                          before,
