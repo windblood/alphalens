@@ -564,6 +564,77 @@ def plot_mean_quantile_returns_spread_time_series(mean_returns_spread,
     return ax
 
 
+def plot_factor_series(factor_series, std_err=None, bandwidth=1, ax=None, name='return'):
+    """
+    Plots period wise returns for factor.
+
+    Parameters
+    ----------
+    factor_series : [pd.DataFrame, pd.Series]
+        Series with factor returns or other time series value by period.
+    std_err : pd.Series, optional
+        Series with standard error of difference between quantile
+        mean returns each period.
+    bandwidth : float
+        Width of displayed error bands in standard deviations.
+    ax : matplotlib.Axes, optional
+        Axes upon which to plot.
+    name: str
+        factor value type
+
+    Returns
+    -------
+    ax : matplotlib.Axes
+        The axes that were plotted on.
+    """
+
+    if isinstance(factor_series, pd.DataFrame):
+        if ax is None:
+            ax = [None for a in factor_series.columns]
+
+        ymin, ymax = (None, None)
+        for (i, a), (col_name, fr_column) in zip(enumerate(ax), factor_series.items()):
+            stdn = None if std_err is None else std_err[col_name]
+            a = plot_factor_series(fr_column, std_err=stdn, ax=a, name=name)
+            ax[i] = a
+            curr_ymin, curr_ymax = a.get_ylim()
+            ymin = curr_ymin if ymin is None else min(ymin, curr_ymin)
+            ymax = curr_ymax if ymax is None else max(ymax, curr_ymax)
+
+        for a in ax:
+            a.set_ylim([ymin, ymax])
+
+        return ax
+
+    if factor_series.isnull().all():
+        return ax
+
+    periods = factor_series.name
+    periods = periods if periods is not None else ""
+    title = f'Factor {name} ({periods} Period)'
+
+    if ax is None:
+        f, ax = plt.subplots(figsize=(18, 6))
+
+    factor_returns_bps = factor_series * DECIMAL_TO_BPS
+
+    factor_returns_bps.plot(alpha=0.4, ax=ax, lw=0.7, color='forestgreen')
+    factor_returns_bps.rolling(window=22).mean().plot(color='orangered', alpha=0.7, ax=ax)
+    ax.legend([name, '1 month moving avg'], loc='upper right')
+
+    if std_err is not None:
+        std_err_bps = std_err * DECIMAL_TO_BPS
+        upper = factor_returns_bps.values + (std_err_bps * bandwidth)
+        lower = factor_returns_bps.values - (std_err_bps * bandwidth)
+        ax.fill_between(factor_series.index, lower, upper, alpha=0.3, color='steelblue')
+
+    ylim = np.nanpercentile(abs(factor_returns_bps.values), 95)
+    ax.set(ylabel=f'Factor {name} (bps)', xlabel='', title=title, ylim=(-ylim, ylim))
+    ax.axhline(0.0, linestyle='-', color='black', lw=1, alpha=0.8)
+
+    return ax
+
+
 def plot_ic_by_group(ic_group, ax=None):
     """
     Plots Spearman Rank Information Coefficient for a given factor over
@@ -658,6 +729,33 @@ def plot_top_bottom_quantile_turnover(quantile_turnover, period=1, ax=None):
     turnover.plot(title='{}D Period Top and Bottom Quantile Turnover'
                   .format(period), ax=ax, alpha=0.6, lw=0.8)
     ax.set(ylabel='Proportion Of Names New To Quantile', xlabel="")
+
+    return ax
+
+
+def plot_weighted_turnover(weighted_turnover, period=1, ax=None):
+    """
+    Plots period wise top and bottom quantile factor turnover.
+
+    Parameters
+    ----------
+    weighted_turnover: pd.Dataframe
+        weighted turnover (each DataFrame column a quantile).
+    period: int, optional
+        Period over which to calculate the turnover.
+    ax : matplotlib.Axes, optional
+        Axes upon which to plot.
+
+    Returns
+    -------
+    ax : matplotlib.Axes
+        The axes that were plotted on.
+    """
+    if ax is None:
+        f, ax = plt.subplots(1, 1, figsize=(18, 6))
+
+    weighted_turnover.plot(title=f'{period}D Period Weighted Turnover', ax=ax, alpha=0.6, lw=0.8)
+    ax.set(ylabel='Proportion Of changed position', xlabel="")
 
     return ax
 

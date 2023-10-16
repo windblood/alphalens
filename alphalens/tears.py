@@ -486,6 +486,85 @@ def create_turnover_tear_sheet(factor_data, turnover_periods=None):
 
 
 @plotting.customize
+def create_weighted_turnover_tear_sheet(factor_data, turnover_periods=None):
+    """
+    Creates a tear sheet for analyzing the weighted turnover properties of a factor.
+
+    Parameters
+    ----------
+    factor_data : pd.DataFrame - MultiIndex
+        A MultiIndex DataFrame indexed by date (level 0) and asset (level 1),
+        containing the values for a single alpha factor, forward returns for
+        each period, and (optionally) the group the asset belongs to.
+        - See full explanation in utils.get_clean_factor_and_forward_returns
+    turnover_periods : sequence[string], optional
+        Periods to compute turnover analysis on. By default periods in
+        'factor_data' are used but custom periods can provided instead. This
+        can be useful when periods in 'factor_data' are not multiples of the
+        frequency at which factor values are computed i.e. the periods
+        are 2h and 4h and the factor is computed daily and so values like
+        ['1D', '2D'] could be used instead
+    """
+
+    if turnover_periods is None:
+        input_periods = utils.get_forward_returns_columns(
+            factor_data.columns, require_exact_day_multiple=True,
+        ).to_numpy()  # get_values()
+        turnover_periods = utils.timedelta_strings_to_integers(input_periods)
+    else:
+        turnover_periods = utils.timedelta_strings_to_integers(
+            turnover_periods,
+        )
+
+    weighted_turnover = {p: perf.weighted_turnover(factor_data, period=p) for p in turnover_periods }
+
+    fr_cols = len(turnover_periods)
+    columns_wide = 1
+    rows_when_wide = ((fr_cols - 1) // 1) + 1
+    vertical_sections = fr_cols + 3 * rows_when_wide + fr_cols
+    gf = GridFigure(rows=vertical_sections, cols=columns_wide)
+
+    for period in turnover_periods:
+        if weighted_turnover[period].isnull().all().all():
+            continue
+        plotting.plot_weighted_turnover(
+            weighted_turnover[period], period=period, ax=gf.next_row()
+        )
+
+    plt.show()
+    gf.close()
+
+
+@plotting.customize
+def create_Fama_Macbeth_tear_sheet(factor_data):
+    """
+    Creates a tear sheet for analyzing the Fama-Macbeth regression of a factor.
+
+    Parameters
+    ----------
+    factor_data : pd.DataFrame - MultiIndex
+        A MultiIndex DataFrame indexed by date (level 0) and asset (level 1),
+        containing the values for a single alpha factor, forward returns for
+        each period, the factor quantile/bin that factor value belongs to, and
+        (optionally) the group the asset belongs to.
+        - See full explanation in utils.get_clean_factor_and_forward_returns
+
+    """
+    returns, tvalues, alpha_beta = perf.factor_returns_Fama_Macbeth(factor_data)
+
+    fr_cols = len(factor_data.columns)
+    vertical_sections = 2 + fr_cols * 3
+    gf = GridFigure(rows=vertical_sections, cols=1)
+
+    print("Fama-Macbeth Regression Returns Analysis")
+    utils.print_table(alpha_beta.apply(lambda x: x.round(4)))
+    plotting.plot_factor_series(returns, name='return')
+    plotting.plot_factor_series(tvalues, name='t-value')
+    plt.show()
+    gf.close()
+
+
+@plotting.customize
 def create_full_tear_sheet(factor_data,
                            long_short=True,
                            group_neutral=False,
@@ -524,6 +603,9 @@ def create_full_tear_sheet(factor_data,
         factor_data, group_neutral, by_group, set_context=False
     )
     create_turnover_tear_sheet(factor_data, set_context=False)
+    # custom analysis
+    create_Fama_Macbeth_tear_sheet(factor_data, set_context=False)
+    create_weighted_turnover_tear_sheet(factor_data, set_context=False)
 
 
 @plotting.customize

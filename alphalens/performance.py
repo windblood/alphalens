@@ -273,6 +273,10 @@ def factor_returns_Fama_Macbeth(factor_data, returns_columns='1D', factor_column
     -------
     returns : pd.DataFrame
         Period wise factor returns
+    tvalues: pd.DataFrame
+        t values for factor returns
+    alpha_beta: pd.DataFrame
+        statistics
     """
     returns = pd.DataFrame()
     tvalues = pd.DataFrame()
