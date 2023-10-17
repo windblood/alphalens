@@ -550,7 +550,7 @@ def create_Fama_Macbeth_tear_sheet(factor_data):
         - See full explanation in utils.get_clean_factor_and_forward_returns
 
     """
-    returns, tvalues, alpha_beta = perf.factor_returns_Fama_Macbeth(factor_data)
+    returns, tvalues, alpha_beta = perf.factor_returns_Fama_Macbeth(factor_data, factor_columns=['factor'])
 
     fr_cols = len(factor_data.columns)
     vertical_sections = 2 + fr_cols * 3
