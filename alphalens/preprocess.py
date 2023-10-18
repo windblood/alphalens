@@ -29,54 +29,80 @@ factors : pd.DataFrame - MultiIndex
 import numpy as np
 import pandas as pd
 from sympy import Matrix, GramSchmidt
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
 
 # na/nan values process
 def process_na(factors, method='fill', **kwargs):
-    res = factors
     if method == 'drop':
         res = factors.dropna()
     elif method == 'fill':
         value = kwargs.get('value', 0)
         if isinstance(value, (int, float)):
             res = factors.fillna(value=value)
-        elif value in ['ffill', 'bfill']:
+        elif value in ['ffill', 'bfill']:   # NOTE: 'bfill'可能引入穿越问题
             res = factors.groupby(level=1).fillna(method=value)
         elif value == 'mean':
             res = factors.groupby(level=0).apply(lambda df: df.fillna(value=df.mean()))
         elif value == 'median':
             res = factors.groupby(level=0).apply(lambda df: df.fillna(value=df.median()))
-
+    else:
+        return factors
     return res
 
 
 # outliers/inf process
+def _outliers_std(df, n):
+    mean_ = df.mean()
+    std_ = df.std()+0.00001
+    deviation = (df-mean_)/std_
+    df = df.where(deviation.abs()<n, mean_ + np.sign(deviation)*n*std_)
+    return df
+
+def _outliers_mad(df, n):
+    mean_ = df.mean()
+    mad_ = (df - mean_).abs().mean() + 0.00001
+    deviation = (df-mean_)/mad_
+    df = df.where(deviation.abs()<n, mean_ + np.sign(deviation)*n*mad_)
+    return df
+
+def _outliers_percentile(df, percentiles):
+    df_percents = df.quantile(percentiles)
+    df = df.where(df>df_percents.loc[percentiles[0]], df_percents.loc[percentiles[0]], axis=1)
+    df = df.where(df<df_percents.loc[percentiles[1]], df_percents.loc[percentiles[1]], axis=1)
+    return df
+
 def process_outliers(factors, method='std', **kwargs):
-    res = factors
     if method == 'std':
-        n = kwargs.get('n', 3)
+        res = factors.groupby(level=0).apply(_outliers_std, n=kwargs.get('n', 3))
     elif method == 'mad':
-        n = kwargs.get('n', 3)
+        res = factors.groupby(level=0).apply(_outliers_mad, n=kwargs.get('n', 3))
     elif method == 'percentile':
         percentiles = kwargs.get('percentile', (0.05, 0.95))
         if isinstance(percentiles, (int, float)):
             if percentiles >= 1:
                 percentiles = percentiles / 100
             percentiles = sorted((1 - percentiles, percentiles))
-
+        res = factors.groupby(level=0).apply(_outliers_percentile, percentiles=percentiles)
+    else:
+        raise ValueError(f'Unsupported method: {method}')
+    res = res.droplevel(level=0)
     return res
 
 
 # normalization
-def normalize(factors, method=None, **kwargs):
-    res = factors
+def normalize(factors, method='zscore', **kwargs):
     if method == 'minmax':
-        pass
+        res = factors.groupby(level=0).apply(lambda x: pd.DataFrame(MinMaxScaler().fit_transform(x.values),
+                                                                    index=x.index, columns=x.columns))
     elif method == 'zscore':
-        pass
+        res = factors.groupby(level=0).apply(lambda x: pd.DataFrame(StandardScaler().fit_transform(x.values),
+                                                                    index=x.index, columns=x.columns))
     elif method == 'rank':
-        pass
-
+        res = factors.groupby(level=0).apply(lambda x:x.rank(method='average', pct=True))
+    else:
+        raise ValueError(f'Unsupported method: {method}')
+    res = res.droplevel(level=0)
     return res
 
 
@@ -170,11 +196,17 @@ def orthogonal_factor(factor, base_factors, method='Schimidt'):
 
 
 if __name__ == '__main__':
-    indices = [['2020-01-01', '2020-02-01', '2020-03-01', '2020-04-01', '2020-05-01'], range(20)]
+    indices = [['2020-01-01', '2020-02-01', '2020-03-01', '2020-04-01', '2020-05-01'], range(200)]
     indices = pd.MultiIndex.from_product(iterables=indices, names=['date', 'asset'])
     columns = ['f1', 'f2', 'f3', 'f4', 'f5']
-    df = pd.DataFrame(np.random.randn(100, 5), index=indices, columns=columns)
+    df = pd.DataFrame(np.random.randn(1000, 5), index=indices, columns=columns)
+    # df_1 = process_outliers(df, method='std')
+    # df_2 = process_outliers(df, method='mad')
+    # df_3 = process_outliers(df, method='percentile')
+    df1 = normalize(df, method='minmax')
+    df2 = normalize(df, method='zscore')
+    df3 = normalize(df, method='rank')
     # new_df = get_orthogonal_factors(arr, 'Schimidt')
-    f6 = pd.DataFrame(np.random.randn(100, 1), index=indices, columns=['f6'])
+    f6 = pd.DataFrame(np.random.randn(1000, 1), index=indices, columns=['f6'])
     new_f6 = orthogonal_factor(f6, df, 'Canonical')
     print('ok')
