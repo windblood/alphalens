@@ -133,7 +133,7 @@ def axes_style(style='darkgrid', rc=None):
 
 def plot_returns_table(alpha_beta,
                        mean_ret_quantile,
-                       mean_ret_spread_quantile):
+                       mean_ret_spread_quantile, export=False):
     returns_table = pd.DataFrame()
     returns_table = pd.concat([returns_table, alpha_beta])
     # returns_table = returns_table.append(alpha_beta)
@@ -146,9 +146,11 @@ def plot_returns_table(alpha_beta,
 
     print("Returns Analysis")
     utils.print_table(returns_table.apply(lambda x: x.round(3)))
+    if export:
+        return returns_table
 
 
-def plot_turnover_table(autocorrelation_data, quantile_turnover):
+def plot_turnover_table(autocorrelation_data, quantile_turnover, export=False):
     turnover_table = pd.DataFrame()
     for period in sorted(quantile_turnover.keys()):
         # for quantile, p_data in quantile_turnover[period].iteritems():
@@ -164,9 +166,11 @@ def plot_turnover_table(autocorrelation_data, quantile_turnover):
     print("Turnover Analysis")
     utils.print_table(turnover_table.apply(lambda x: x.round(3)))
     utils.print_table(auto_corr.apply(lambda x: x.round(3)))
+    if export:
+        return turnover_table, auto_corr
 
 
-def plot_information_table(ic_data):
+def plot_information_table(ic_data, export=False):
     ic_summary_table = pd.DataFrame()
     ic_summary_table["IC Mean"] = ic_data.mean()
     ic_summary_table["IC Std."] = ic_data.std()
@@ -180,9 +184,11 @@ def plot_information_table(ic_data):
 
     print("Information Analysis")
     utils.print_table(ic_summary_table.apply(lambda x: x.round(3)).T)
+    if export:
+        return ic_summary_table
 
 
-def plot_quantile_statistics_table(factor_data):
+def plot_quantile_statistics_table(factor_data, export=False):
     factor_data = factor_data.select_dtypes(exclude='category')
     quantile_stats = factor_data.groupby('factor_quantile') \
         .agg(['min', 'max', 'mean', 'std', 'count'])['factor']
@@ -191,6 +197,8 @@ def plot_quantile_statistics_table(factor_data):
 
     print("Quantiles Statistics")
     utils.print_table(quantile_stats)
+    if export:
+        return quantile_stats
 
 
 def plot_ic_ts(ic, ax=None):

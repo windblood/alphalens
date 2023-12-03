@@ -12,11 +12,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from pathlib import Path
 
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import pandas as pd
 import warnings
+from plottable import Table
 
 from . import plotting
 from . import performance as perf
@@ -607,6 +609,330 @@ def create_full_tear_sheet(factor_data,
     create_Fama_Macbeth_tear_sheet(factor_data, set_context=False)
     create_weighted_turnover_tear_sheet(factor_data, set_context=False)
 
+
+
+@plotting.customize
+def export_full_tear_sheet(factor_data, export_path=Path('.'), name=None,
+                           long_short=True,
+                           group_neutral=False,
+                           by_group=False, turnover_periods=None):
+    """
+    Creates a full tear sheet for analysis and evaluating single
+    return predicting (alpha) factor.
+
+    Parameters
+    ----------
+    factor_data : pd.DataFrame - MultiIndex
+        A MultiIndex DataFrame indexed by date (level 0) and asset (level 1),
+        containing the values for a single alpha factor, forward returns for
+        each period, the factor quantile/bin that factor value belongs to, and
+        (optionally) the group the asset belongs to.
+        - See full explanation in utils.get_clean_factor_and_forward_returns
+    long_short : bool
+        Should this computation happen on a long short portfolio?
+        - See tears.create_returns_tear_sheet for details on how this flag
+        affects returns analysis
+    group_neutral : bool
+        Should this computation happen on a group neutral portfolio?
+        - See tears.create_returns_tear_sheet for details on how this flag
+        affects returns analysis
+        - See tears.create_information_tear_sheet for details on how this
+        flag affects information analysis
+    by_group : bool
+        If True, display graphs separately for each group.
+    """
+    if turnover_periods is None:
+        input_periods = utils.get_forward_returns_columns(
+            factor_data.columns, require_exact_day_multiple=True,).to_numpy()  # get_values()
+        turnover_periods = utils.timedelta_strings_to_integers(input_periods)
+    else:
+        turnover_periods = utils.timedelta_strings_to_integers(turnover_periods,)
+
+    from matplotlib.backends.backend_pdf import PdfPages
+
+    res = []
+    with PdfPages(export_path / f'{name}.pdf') as pdf:
+        quantile_stats = plotting.plot_quantile_statistics_table(factor_data, export=True)
+        plt.figure(figsize=(14,9))
+        Table(quantile_stats.apply(lambda x:x.round(3)))
+        pdf.savefig()
+        plt.close()
+
+        # return analysis
+        factor_returns = perf.factor_returns(factor_data, long_short, group_neutral)
+
+        mean_quant_ret, std_quantile = perf.mean_return_by_quantile(
+            factor_data,
+            by_group=False,
+            demeaned=long_short,
+            group_adjust=group_neutral,
+        )
+
+        mean_quant_rateret = mean_quant_ret.apply(
+            utils.rate_of_return, axis=0, base_period=mean_quant_ret.columns[0]
+        )
+
+        mean_quant_ret_bydate, std_quant_daily = perf.mean_return_by_quantile(
+            factor_data,
+            by_date=True,
+            by_group=False,
+            demeaned=long_short,
+            group_adjust=group_neutral,
+        )
+
+        mean_quant_rateret_bydate = mean_quant_ret_bydate.apply(
+            utils.rate_of_return,
+            axis=0,
+            base_period=mean_quant_ret_bydate.columns[0],
+        )
+
+        compstd_quant_daily = std_quant_daily.apply(
+            utils.std_conversion, axis=0, base_period=std_quant_daily.columns[0]
+        )
+
+        alpha_beta = perf.factor_alpha_beta(factor_data, factor_returns, long_short, group_neutral)
+
+        mean_ret_spread_quant, std_spread_quant = perf.compute_mean_returns_spread(
+            mean_quant_rateret_bydate,
+            factor_data["factor_quantile"].max(),
+            factor_data["factor_quantile"].min(),
+            std_err=compstd_quant_daily,
+        )
+
+        returns_table = plotting.plot_returns_table(alpha_beta, mean_quant_rateret, mean_ret_spread_quant, export=True)
+        plt.figure(figsize=(14, 9))
+        Table(returns_table.apply(lambda x:x.round(3)))
+        pdf.savefig()
+        plt.close()
+
+        fr_cols = len(factor_returns.columns)
+        vertical_sections = 2 + fr_cols
+        if '1D' in factor_returns:
+            vertical_sections += 2
+        gf = GridFigure(rows=vertical_sections, cols=1)
+
+        plotting.plot_returns_table(
+            alpha_beta, mean_quant_rateret, mean_ret_spread_quant
+        )
+
+        plotting.plot_quantile_returns_bar(
+            mean_quant_rateret,
+            by_group=False,
+            ylim_percentiles=None,
+            ax=gf.next_row(),
+        )
+
+        plotting.plot_quantile_returns_violin(
+            mean_quant_rateret_bydate, ylim_percentiles=(1, 99), ax=gf.next_row()
+        )
+
+        trading_calendar = factor_data.index.levels[0].freq
+        if trading_calendar is None:
+            trading_calendar = pd.tseries.offsets.BDay()
+            warnings.warn(
+                "'freq' not set in factor_data index: assuming business day",
+                UserWarning,
+            )
+
+        # Compute cumulative returns from daily simple returns, if '1D'
+        # returns are provided.
+        if "1D" in factor_returns:
+            title = (
+                    "Factor Weighted "
+                    + ("Group Neutral " if group_neutral else "")
+                    + ("Long/Short " if long_short else "")
+                    + "Portfolio Cumulative Return (1D Period)"
+            )
+
+            plotting.plot_cumulative_returns(
+                factor_returns["1D"], period="1D", title=title, ax=gf.next_row()
+            )
+
+            plotting.plot_cumulative_returns_by_quantile(
+                mean_quant_ret_bydate["1D"], period="1D", ax=gf.next_row()
+            )
+
+        ax_mean_quantile_returns_spread_ts = [
+            gf.next_row() for x in range(fr_cols)
+        ]
+        plotting.plot_mean_quantile_returns_spread_time_series(
+            mean_ret_spread_quant,
+            std_err=std_spread_quant,
+            bandwidth=0.5,
+            ax=ax_mean_quantile_returns_spread_ts,
+        )
+
+        pdf.savefig()
+        gf.close()
+
+        if by_group:
+            (
+                mean_return_quantile_group,
+                mean_return_quantile_group_std_err,
+            ) = perf.mean_return_by_quantile(
+                factor_data,
+                by_date=False,
+                by_group=True,
+                demeaned=long_short,
+                group_adjust=group_neutral,
+            )
+
+            mean_quant_rateret_group = mean_return_quantile_group.apply(
+                utils.rate_of_return,
+                axis=0,
+                base_period=mean_return_quantile_group.columns[0],
+            )
+
+            num_groups = len(
+                mean_quant_rateret_group.index.get_level_values("group").unique()
+            )
+
+            vertical_sections = 1 + (((num_groups - 1) // 2) + 1)
+            gf = GridFigure(rows=vertical_sections, cols=2)
+
+            ax_quantile_returns_bar_by_group = [
+                gf.next_cell() for _ in range(num_groups)
+            ]
+            plotting.plot_quantile_returns_bar(
+                mean_quant_rateret_group,
+                by_group=True,
+                ylim_percentiles=(5, 95),
+                ax=ax_quantile_returns_bar_by_group,
+            )
+            pdf.savefig()
+            gf.close()
+
+        res.append(alpha_beta.melt(ignore_index=False).set_index('variable', append=True))
+
+        # information analysis
+        ic = perf.factor_information_coefficient(factor_data, group_neutral)
+        ic_summary = plotting.plot_information_table(ic, export=True)
+        plt.figure(figsize=(14, 9))
+        Table(ic_summary.apply(lambda x:x.round(3)))
+        pdf.savefig()
+        plt.close()
+
+        columns_wide = 2
+        fr_cols = len(ic.columns)
+        rows_when_wide = ((fr_cols - 1) // columns_wide) + 1
+        vertical_sections = fr_cols + 3 * rows_when_wide + fr_cols
+        gf = GridFigure(rows=vertical_sections, cols=columns_wide)
+
+        ax_ic_ts = [gf.next_row() for _ in range(fr_cols)]
+        plotting.plot_ic_ts(ic, ax=ax_ic_ts)
+
+        ax_ic_hqq = [gf.next_cell() for _ in range(fr_cols * 2)]
+        plotting.plot_ic_hist(ic, ax=ax_ic_hqq[::2])
+        plotting.plot_ic_qq(ic, ax=ax_ic_hqq[1::2])
+
+        if not by_group:
+            mean_monthly_ic = perf.mean_information_coefficient(
+                factor_data,
+                group_adjust=group_neutral,
+                by_group=False,
+                by_time="M",
+            )
+            ax_monthly_ic_heatmap = [gf.next_cell() for x in range(fr_cols)]
+            plotting.plot_monthly_ic_heatmap(
+                mean_monthly_ic, ax=ax_monthly_ic_heatmap
+            )
+
+        if by_group:
+            mean_group_ic = perf.mean_information_coefficient(
+                factor_data, group_adjust=group_neutral, by_group=True
+            )
+
+            plotting.plot_ic_by_group(mean_group_ic, ax=gf.next_row())
+
+        pdf.savefig()
+        gf.close()
+
+        res.append(ic_summary[['IC Mean', 'Risk-adjusted IC']].T.melt(ignore_index=False).set_index('variable', append=True))
+
+        # turnover analysis
+        quantile_factor = factor_data["factor_quantile"]
+
+        quantile_turnover = {
+            p: pd.concat(
+                [
+                    perf.quantile_turnover(quantile_factor, q, p)
+                    for q in quantile_factor.sort_values().unique().tolist()
+                ],
+                axis=1,
+            )
+            for p in turnover_periods
+        }
+
+        auto_correlation = pd.concat(
+            [
+                perf.factor_rank_autocorrelation(factor_data, period)
+                for period in turnover_periods
+            ],
+            axis=1,
+        )
+
+        turnover_summary, autocorr_summary = plotting.plot_turnover_table(auto_correlation, quantile_turnover, export=True)
+        f, ax = plt.subplots(2, 1, figsize=(14, 16))
+        Table(turnover_summary.apply(lambda x:x.round(3)), ax=ax[0])
+        Table(autocorr_summary.apply(lambda x:x.round(3)), ax=ax[1])
+        pdf.savefig()
+        plt.close()
+
+        fr_cols = len(turnover_periods)
+        vertical_sections = fr_cols + fr_cols
+        gf = GridFigure(rows=vertical_sections, cols=1)
+
+        for period in turnover_periods:
+            if quantile_turnover[period].isnull().all().all():
+                continue
+            plotting.plot_top_bottom_quantile_turnover(
+                quantile_turnover[period], period=period, ax=gf.next_row()
+            )
+
+        for period in auto_correlation:
+            if auto_correlation[period].isnull().all():
+                continue
+            plotting.plot_factor_rank_auto_correlation(
+                auto_correlation[period], period=period, ax=gf.next_row()
+            )
+
+        pdf.savefig()
+        gf.close()
+
+        # custom analysis
+        returns, tvalues, alpha_beta_FM = perf.factor_returns_Fama_Macbeth(factor_data, factor_columns=['factor'])
+        alpha_beta_FM.rename(columns={'factor': 'value'}, inplace=True)
+
+        plt.figure(figsize=(14, 9))
+        Table(alpha_beta_FM.apply(lambda x:x.round(3)))
+        pdf.savefig()
+        plt.close()
+
+        print('Fama-Macbeth Regression Returns Analysis')
+        utils.print_table(alpha_beta.apply(lambda x:x.round(4)))
+        gf = GridFigure(rows=2, cols=1)
+        plotting.plot_factor_series(returns, name='return', ax=[gf.next_row()])
+        plotting.plot_factor_series(tvalues, name='t-value', ax=[gf.next_row()])
+        pdf.savefig()
+        gf.close()
+        res.append(alpha_beta_FM)
+
+        # weighted turnover
+        weighted_turnover = {p: perf.weighted_turnover(factor_data, period=p) for p in turnover_periods}
+
+        fr_cols = len(turnover_periods)
+        vertical_sections = fr_cols
+        gf = GridFigure(rows=vertical_sections, cols=1)
+
+        for period in turnover_periods:
+            if weighted_turnover[period].isnull().all().all():
+                continue
+            plotting.plot_weighted_turnover(weighted_turnover[period], period=period, ax=gf.next_row())
+
+        pdf.savefig()
+        gf.close()
+
+    return res
 
 @plotting.customize
 def create_event_returns_tear_sheet(factor_data,

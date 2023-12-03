@@ -19,6 +19,7 @@ install_reqs = [
     'IPython>=3.2.3',
     'empyrical>=0.5.0',
     'sympy',
+    'plottable',
 ]
 
 extra_reqs = {

@@ -337,8 +337,10 @@ def compute_forward_returns(factor,
 
     # now set the columns correctly
     df = df[column_list]
-
-    df.index.levels[0].freq = freq
+    try:
+        df.index.levels[0].freq = freq
+    except ValueError as e:
+        print(e)
     df.index.set_names(['date', 'asset'], inplace=True)
 
     return df

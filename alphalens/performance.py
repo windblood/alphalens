@@ -294,7 +294,7 @@ def factor_returns_Fama_Macbeth(factor_data, returns_columns='1D', factor_column
         y = tmp_factor[returns_columns].values
         # 当前收益对因子载荷做回归
         # 回归系数即为因子当期收益率
-        reg_fit = OLS(y, X).fit()
+        reg_fit = OLS(y, X, missing='drop').fit()
         try:
             beta = reg_fit.params[1:]
             t_beta = reg_fit.tvalues[1:]
@@ -381,7 +381,7 @@ def factor_alpha_beta(factor_data,
         y = returns[period].values
         x = add_constant(x)
 
-        reg_fit = OLS(y, x).fit()
+        reg_fit = OLS(y, x, missing='drop').fit()
         try:
             alpha, beta = reg_fit.params
         except ValueError:
