@@ -1138,3 +1138,174 @@ def create_event_study_tear_sheet(factor_data,
 
     plt.show()
     gf.close()
+
+
+@plotting.customize
+def export_event_study_tear_sheet(factor_data,
+                                  returns, export_path=Path('.'), name='test',
+                                  avgretplot=(5, 15),
+                                  rate_of_ret=True,
+                                  n_bars=50, group_nuetral=False, std_bar=True, by_group=False):
+    """
+    Creates an event study tear sheet for analysis of a specific event.
+
+    Parameters
+    ----------
+    factor_data : pd.DataFrame - MultiIndex
+        A MultiIndex DataFrame indexed by date (level 0) and asset (level 1),
+        containing the values for a single event, forward returns for each
+        period, the factor quantile/bin that factor value belongs to, and
+        (optionally) the group the asset belongs to.
+    returns : pd.DataFrame, required only if 'avgretplot' is provided
+        A DataFrame indexed by date with assets in the columns containing daily
+        returns.
+        - See full explanation in utils.get_clean_factor_and_forward_returns
+    avgretplot: tuple (int, int) - (before, after), optional
+        If not None, plot event style average cumulative returns within a
+        window (pre and post event).
+    rate_of_ret : bool, optional
+        Display rate of return instead of simple return in 'Mean Period Wise
+        Return By Factor Quantile' and 'Period Wise Return By Factor Quantile'
+        plots
+    n_bars : int, optional
+        Number of bars in event distribution plot
+    group_neutral : bool
+        Should this computation happen on a group neutral portfolio? if so,
+        returns demeaning will occur on the group level.
+    std_bar : boolean, optional
+        Show plots with standard deviation bars, one for each quantile
+    by_group : bool
+        If True, display graphs separately for each group.
+    """
+    long_short = False
+    res = []
+    from matplotlib.backends.backend_pdf import PdfPages
+    with PdfPages(export_path / f'{name}.pdf') as pdf:
+        quantile_stats = plotting.plot_quantile_statistics_table(factor_data)
+        plt.figure(figsize=(14, 8))
+        Table(quantile_stats.apply(lambda x:x.round(3)))
+        pdf.savefig()
+        plt.close()
+        res.append(quantile_stats)
+
+        gf = GridFigure(rows=2, cols=1)
+        plotting.plot_events_distribution(
+            events=factor_data["factor"], num_bars=n_bars, ax=gf.next_row()
+        )
+        pdf.savefig()
+        gf.close()
+
+        if returns is not None and avgretplot is not None:
+            before, after = avgretplot
+            avg_cumulative_returns = perf.average_cumulative_return_by_quantile(
+                factor_data,
+                returns,
+                periods_before=before,
+                periods_after=after,
+                demeaned=long_short,
+                group_adjust=False,
+            )
+
+            num_quantiles = int(factor_data["factor_quantile"].max())
+
+            vertical_sections = 1
+            if std_bar:
+                vertical_sections += ((num_quantiles - 1) // 2) + 1
+            cols = 2 if num_quantiles != 1 else 1
+            gf = GridFigure(rows=vertical_sections, cols=cols)
+            plotting.plot_quantile_average_cumulative_return(
+                avg_cumulative_returns,
+                by_quantile=False,
+                std_bar=False,
+                ax=gf.next_row(),
+            )
+            if std_bar:
+                ax_avg_cumulative_returns_by_q = [
+                    gf.next_cell() for _ in range(num_quantiles)
+                ]
+                plotting.plot_quantile_average_cumulative_return(
+                    avg_cumulative_returns,
+                    by_quantile=True,
+                    std_bar=True,
+                    ax=ax_avg_cumulative_returns_by_q,
+                )
+
+            pdf.savefig()
+            gf.close()
+
+            if by_group:
+                groups = factor_data["group"].unique()
+                num_groups = len(groups)
+                vertical_sections = ((num_groups - 1) // 2) + 1
+                gf = GridFigure(rows=vertical_sections, cols=2)
+
+                avg_cumret_by_group = perf.average_cumulative_return_by_quantile(
+                    factor_data,
+                    returns,
+                    periods_before=before,
+                    periods_after=after,
+                    demeaned=long_short,
+                    group_adjust=group_nuetral,
+                    by_group=True,
+                )
+
+                for group, avg_cumret in avg_cumret_by_group.groupby(level="group"):
+                    avg_cumret.index = avg_cumret.index.droplevel("group")
+                    plotting.plot_quantile_average_cumulative_return(
+                        avg_cumret,
+                        by_quantile=False,
+                        std_bar=False,
+                        title=group,
+                        ax=gf.next_cell(),
+                    )
+
+                pdf.savefig()
+                gf.close()
+
+        factor_returns = perf.factor_returns(
+            factor_data, demeaned=False, equal_weight=True
+        )
+
+        mean_quant_ret, std_quantile = perf.mean_return_by_quantile(
+            factor_data, by_group=False, demeaned=long_short
+        )
+        res.append(mean_quant_ret)
+
+        if rate_of_ret:
+            mean_quant_ret = mean_quant_ret.apply(
+                utils.rate_of_return, axis=0, base_period=mean_quant_ret.columns[0]
+            )
+
+        mean_quant_ret_bydate, std_quant_daily = perf.mean_return_by_quantile(
+            factor_data, by_date=True, by_group=False, demeaned=long_short
+        )
+        if rate_of_ret:
+            mean_quant_ret_bydate = mean_quant_ret_bydate.apply(
+                utils.rate_of_return,
+                axis=0,
+                base_period=mean_quant_ret_bydate.columns[0],
+            )
+
+        fr_cols = len(factor_returns.columns)
+        vertical_sections = 2 + fr_cols * 1
+        gf = GridFigure(rows=vertical_sections + 1, cols=1)
+
+        plotting.plot_quantile_returns_bar(
+            mean_quant_ret, by_group=False, ylim_percentiles=None, ax=gf.next_row()
+        )
+
+        plotting.plot_quantile_returns_violin(
+            mean_quant_ret_bydate, ylim_percentiles=(1, 99), ax=gf.next_row()
+        )
+
+        trading_calendar = factor_data.index.levels[0].freq
+        if trading_calendar is None:
+            trading_calendar = pd.tseries.offsets.BDay()
+            warnings.warn(
+                "'freq' not set in factor_data index: assuming business day",
+                UserWarning,
+            )
+
+        pdf.savefig()
+        gf.close()
+    return res
