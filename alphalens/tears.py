@@ -19,6 +19,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import warnings
 from plottable import Table
+from scipy import stats
 
 from . import plotting
 from . import performance as perf
@@ -1308,4 +1309,184 @@ def export_event_study_tear_sheet(factor_data,
 
         pdf.savefig()
         gf.close()
+    return res
+
+
+@plotting.customize
+def export_ts_study_tear_sheet(factor_data, returns,
+                               export_path=Path('.'), name='test', thres_value=None, thres_quantile=None,
+                               avgretplot=(5, 15), rate_of_ret=True,
+                               n_bars=50, group_nuetral=False, std_bar=True, by_group=False):
+    """
+    Creates a full tear sheet for analysis and evaluationg single time series.
+
+    Parameters
+    ----------
+    factor_data : pd.DataFrame - MultiIndex
+        A MultiIndex DataFrame indexed by date (level 0) and asset (level 1),
+        containing the values for a single event, forward returns for each
+        period, the factor quantile/bin that factor value belongs to, and
+        (optionally) the group the asset belongs to.
+    returns : pd.DataFrame, required only if 'avgretplot' is provided
+        A DataFrame indexed by date with assets in the columns containing daily
+        returns.
+        - See full explanation in utils.get_clean_factor_and_forward_returns
+    avgretplot: tuple (int, int) - (before, after), optional
+        If not None, plot event style average cumulative returns within a
+        window (pre and post event).
+    rate_of_ret : bool, optional
+        Display rate of return instead of simple return in 'Mean Period Wise
+        Return By Factor Quantile' and 'Period Wise Return By Factor Quantile'
+        plots
+    n_bars : int, optional
+        Number of bars in event distribution plot
+    group_neutral : bool
+        Should this computation happen on a group neutral portfolio? if so,
+        returns demeaning will occur on the group level.
+    std_bar : boolean, optional
+        Show plots with standard deviation bars, one for each quantile
+    by_group : bool
+        If True, display graphs separately for each group.
+    """
+    long_short = False
+    res = {}
+    from matplotlib.backends.backend_pdf import PdfPages
+    with PdfPages(export_path / f'{name}.pdf') as pdf:
+        # factor distribution description
+        plt.figure(figsize=(14, 8))
+        factor_data['factor'].hist(bins=20)
+        pdf.savefig()
+        plt.close()
+
+        # quantile stats
+        if 'factor_quantile' in factor_data.columns and len(factor_data['factor_quantile'].unique()) > 1:
+            quantile_stats = plotting.plot_quantile_statistics_table(factor_data)
+            plt.figure(figsize=(14, 9))
+            Table(quantile_stats.apply(lambda x: x.round(3)))
+            pdf.savefig()
+            plt.close()
+            res['quantile_stat'] = quantile_stats
+
+        # time series correlation between factor and returns
+        forward_ret_cols = utils.get_forward_returns_columns(factor_data)
+        ic = {col: stats.spearman(factor_data[col], factor_data['factor'])[0] for col in forward_ret_cols}
+        ic_pearson = {col:stats.pearsonr(factor_data[col], factor_data['factor'])[0] for col in forward_ret_cols}
+        ic = pd.DataFrame([ic, ic_pearson], index=['ic', 'ic_pearson'])
+        plt.figure(figsize=(14, 9))
+        Table(ic.apply(lambda x:x.round(4)))
+        pdf.savefig()
+        plt.close()
+
+        res['ic'] = ic
+
+        # factor return analysis using event study if thres_value/quantile is not None
+        if thres_value is not None or thres_quantile is not None:
+            if thres_value is not None:
+                event_data = factor_data[factor_data['factor'].abs() > thres_value]
+                event_data.loc[event_data['factor'] < -thres_value, 'factor_quantile'] = 1
+                event_data.loc[event_data['factor'] > thres_value, 'factor_quantile'] = 2
+            else:
+                thres_quantile = sorted([thres_quantile, 1-thres_quantile])
+                quantile_thres = factor_data['factor'].quantile(thres_quantile)
+                event_data = factor_data[(factor_data['factor'] < quantile_thres.iloc[0]) |
+                                         (factor_data['factor'] > quantile_thres.iloc[1])]
+                event_data.loc[event_data['factor'] < quantile_thres.iloc[0], 'factor_quantile'] = 1
+                event_data.loc[event_data['factor'] > quantile_thres.iloc[1], 'factor_quantile'] = 2
+
+            # distribution
+            gf = GridFigure(rows=2, cols=1)
+            plotting.plot_events_distribution(
+                events=event_data["factor"], num_bars=n_bars, ax=gf.next_row()
+            )
+            pdf.savefig()
+            gf.close()
+
+            # information
+            ic_event = {col: stats.spearman(event_data[col], event_data['factor'])[0] for col in forward_ret_cols}
+            ic_pearson_event = {col: stats.pearsonr(event_data[col], event_data['factor'])[0] for col in forward_ret_cols}
+            ic_event = pd.DataFrame([ic_event, ic_pearson_event], index=['ic', 'ic_pearson'])
+            plt.figure(figsize=(14, 9))
+            Table(ic_event.apply(lambda x: x.round(4)))
+            pdf.savefig()
+            plt.close()
+            res['ic_event'] = ic_event
+
+            if returns is not None and avgretplot is not None:
+                before, after = avgretplot
+                avg_cumulative_returns = perf.average_cumulative_return_by_quantile(
+                    event_data,
+                    returns,
+                    periods_before=before,
+                    periods_after=after,
+                    demeaned=long_short,
+                    group_adjust=False,
+                )
+
+                avg_cumulative_returns.sort_index(axis=1, inplace=True)
+                avg_cumulative_returns.loc[(slice(None), 'mean'), :] = (avg_cumulative_returns.loc[(slice(None), 'mean'), :].values /
+                                                                        avg_cumulative_returns.loc[(slice(None), 'mean'), 0].values)
+
+
+                num_quantiles = int(event_data["factor_quantile"].max())
+
+                vertical_sections = 1
+                vertical_sections += ((num_quantiles - 1) // 2) + 1
+                cols = 2 if num_quantiles != 1 else 1
+                gf = GridFigure(rows=vertical_sections, cols=cols)
+                plotting.plot_quantile_average_cumulative_return(
+                    avg_cumulative_returns,
+                    by_quantile=False,
+                    std_bar=False,
+                    ax=gf.next_row(),
+                )
+                ax_avg_cumulative_returns_by_q = [
+                    gf.next_cell() for _ in range(num_quantiles)
+                ]
+                plotting.plot_quantile_average_cumulative_return(
+                    avg_cumulative_returns,
+                    by_quantile=True,
+                    std_bar=True,
+                    ax=ax_avg_cumulative_returns_by_q,
+                )
+
+                pdf.savefig()
+                gf.close()
+
+            event_returns = perf.factor_returns(
+                event_data, demeaned=False, equal_weight=True
+            )
+
+            mean_quant_ret, std_quantile = perf.mean_return_by_quantile(
+                event_data, by_group=False, demeaned=long_short
+            )
+
+            if rate_of_ret:
+                mean_quant_ret = mean_quant_ret.apply(
+                    utils.rate_of_return, axis=0, base_period=mean_quant_ret.columns[0]
+                )
+
+            mean_quant_ret_bydate, std_quant_daily = perf.mean_return_by_quantile(
+                event_data, by_date=True, by_group=False, demeaned=long_short
+            )
+            if rate_of_ret:
+                mean_quant_ret_bydate = mean_quant_ret_bydate.apply(
+                    utils.rate_of_return,
+                    axis=0,
+                    base_period=mean_quant_ret_bydate.columns[0],
+                )
+
+            fr_cols = len(event_returns.columns)
+            vertical_sections = 2 + fr_cols * 1
+            gf = GridFigure(rows=vertical_sections + 1, cols=1)
+
+            plotting.plot_quantile_returns_bar(
+                mean_quant_ret, by_group=False, ylim_percentiles=None, ax=gf.next_row()
+            )
+
+            plotting.plot_quantile_returns_violin(
+                mean_quant_ret_bydate, ylim_percentiles=(1, 99), ax=gf.next_row()
+            )
+
+            pdf.savefig()
+            gf.close()
     return res
