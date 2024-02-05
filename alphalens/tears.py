@@ -564,7 +564,9 @@ def create_Fama_Macbeth_tear_sheet(factor_data):
     plotting.plot_factor_series(returns, name='return')
     plotting.plot_factor_series(tvalues, name='t-value')
     plt.show()
+    fig = gf.fig
     gf.close()
+    return fig, alpha_beta
 
 
 @plotting.customize
@@ -611,12 +613,12 @@ def create_full_tear_sheet(factor_data,
     create_weighted_turnover_tear_sheet(factor_data, set_context=False)
 
 
-
 @plotting.customize
 def export_full_tear_sheet(factor_data, export_path=Path('.'), name=None,
                            long_short=True,
                            group_neutral=False,
-                           by_group=False, turnover_periods=None):
+                           by_group=False,
+                           turnover_periods=None):
     """
     Creates a full tear sheet for analysis and evaluating single
     return predicting (alpha) factor.
@@ -838,7 +840,7 @@ def export_full_tear_sheet(factor_data, export_path=Path('.'), name=None,
                 mean_monthly_ic, ax=ax_monthly_ic_heatmap
             )
 
-        if by_group:
+        else:
             mean_group_ic = perf.mean_information_coefficient(
                 factor_data, group_adjust=group_neutral, by_group=True
             )
@@ -1313,10 +1315,10 @@ def export_event_study_tear_sheet(factor_data,
 
 
 @plotting.customize
-def export_ts_study_tear_sheet(factor_data, returns,
-                               export_path=Path('.'), name='test', thres_value=None, thres_quantile=None,
-                               avgretplot=(5, 15), rate_of_ret=True,
-                               n_bars=50, group_nuetral=False, std_bar=True, by_group=False):
+def export_ts_tear_sheet(factor_data, returns,
+                         export_path=Path('.'), name='test', thres_value=None, thres_quantile=None,
+                         avgretplot=(5, 15), rate_of_ret=True,
+                         n_bars=50, group_nuetral=False, std_bar=True, by_group=False):
     """
     Creates a full tear sheet for analysis and evaluationg single time series.
 
@@ -1378,6 +1380,19 @@ def export_ts_study_tear_sheet(factor_data, returns,
         plt.close()
 
         res['ic'] = ic
+
+        # returns analysis group by quantiles/bins
+        group_stats = factor_data.groupby('factor_quantile')[forward_ret_cols].agg(['mean', 'std', 'count'])
+        for col in forward_ret_cols:
+            tmp_stat = group_stats.loc[:, col].copy()
+            tmp_stat['t-value'] = tmp_stat['mean'] / tmp_stat['std']
+            tmp_stat.columns = [x+'_'+col for x in tmp_stat.columns]
+            plt.figure(figsize=(14,9))
+            Table(tmp_stat.apply(lambda x: x.round(6)))
+            pdf.savefig()
+            plt.close()
+
+        res['quantile_return'] = group_stats
 
         # factor return analysis using event study if thres_value/quantile is not None
         if thres_value is not None or thres_quantile is not None:
