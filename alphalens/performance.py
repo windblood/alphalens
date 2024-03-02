@@ -25,9 +25,55 @@ from statsmodels.tools.tools import add_constant
 from . import utils
 
 
+def get_factor_ttest(factor_ser: pd.Series, returns: pd.DataFrame) -> pd.Series:
+    """
+    计算因子的t检验值。
+
+    参数：
+    factor_ser: pd.Series
+        因子数据序列。
+    returns: pd.DataFrame
+        收益数据框。
+
+    返回：
+    pd.Series
+        包含因子超额收益和t值的序列。
+    """
+    result = OLS(returns, add_constant(factor_ser)).fit()
+    return pd.Series({"beat_factor": result.params[1], "tvalue": result.pvalues[1]})
+
+
+def calculate_factor_ttest(factor_data: pd.DataFrame) -> pd.DataFrame:
+    """
+    计算因子的t检验值。
+
+    参数：
+    factor_data (pd.DataFrame): 包含因子数据的DataFrame。
+
+    返回：
+    pd.DataFrame: 包含因子的t检验值的DataFrame。
+    """
+
+    def src_ttest(group: pd.DataFrame, forward_returns_columns) -> pd.Series:
+        factor_series: pd.Series = group["factor"]
+        return group[forward_returns_columns].apply(
+            lambda x: get_factor_ttest(factor_series, x)
+        )
+
+    forward_returns_columns = utils.get_forward_returns_columns(
+        factor_data.columns
+    )
+    ttest_result: pd.DataFrame = factor_data.groupby(level="date").apply(
+        lambda group: src_ttest(group, forward_returns_columns)
+    )
+
+    return ttest_result.unstack(level=1)
+
+
 def factor_information_coefficient(factor_data,
                                    group_adjust=False,
-                                   by_group=False):
+                                   by_group=False,
+                                   method=stats.spearmanr):
     """
     Computes the Spearman Rank Correlation based Information Coefficient (IC)
     between factor values and N period forward returns for each period in
@@ -56,7 +102,7 @@ def factor_information_coefficient(factor_data,
     def src_ic(group):
         f = group['factor']
         _ic = group[utils.get_forward_returns_columns(factor_data.columns)] \
-            .apply(lambda x: stats.spearmanr(x, f)[0])
+            .apply(lambda x: method(x, f)[0])
         return _ic
 
     factor_data = factor_data.copy()
@@ -69,7 +115,10 @@ def factor_information_coefficient(factor_data,
     if by_group:
         grouper.append('group')
 
-    ic = factor_data.groupby(grouper).apply(src_ic)
+    # ic = factor_data.groupby(grouper).apply(src_ic)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ic = factor_data.groupby(grouper, group_keys=False).apply(src_ic)
+
 
     return ic
 
@@ -77,7 +126,8 @@ def factor_information_coefficient(factor_data,
 def mean_information_coefficient(factor_data,
                                  group_adjust=False,
                                  by_group=False,
-                                 by_time=None):
+                                 by_time=None,
+                                 method=stats.spearmanr,):
     """
     Get the mean information coefficient of specified groups.
     Answers questions like:
@@ -109,7 +159,7 @@ def mean_information_coefficient(factor_data,
         forward price movement windows.
     """
 
-    ic = factor_information_coefficient(factor_data, group_adjust, by_group)
+    ic = factor_information_coefficient(factor_data, group_adjust, by_group, method=method)
 
     grouper = []
     if by_time is not None:
@@ -254,6 +304,57 @@ def factor_returns(factor_data,
 
     return returns
 
+def factor_returns_own(factor_data, demeaned=True, group_adjust=False):
+    """
+    计算按因子值加权的投资组合的收益
+    权重为去均值的因子除以其绝对值之和 (实现总杠杆率为1).
+
+    参数
+    ----------
+    factor_data : pd.DataFrame - MultiIndex
+        一个 DataFrame, index 为日期 (level 0) 和资产(level 1) 的 MultiIndex,
+        values 包括因子的值, 各期因子远期收益, 因子分位数,
+        因子分组(可选), 因子权重(可选)
+    demeaned : bool
+        因子分析是否基于一个多空组合? 如果是 True, 则计算权重时因子值需要去均值
+    group_adjust : bool
+        因子分析是否基于一个分组(行业)中性的组合?
+        如果是 True, 则计算权重时因子值需要根据分组和日期去均值
+
+    返回值
+    -------
+    returns : pd.DataFrame
+        每期零风险暴露的多空组合收益
+    """
+
+    def to_weights(group, is_long_short):
+        if is_long_short:
+            demeaned_vals = group - group.mean()
+            return demeaned_vals / demeaned_vals.abs().sum()
+        else:
+            return group / group.abs().sum()
+
+    grouper = [factor_data.index.get_level_values("date")]
+    if group_adjust:
+        grouper.append("group")
+
+    # TODO: 如果factor_data包含weight，加入group_weight参数使用已有weight
+    weights = factor_data.groupby(grouper, group_keys=False)["factor"].apply(
+        to_weights, demeaned
+    )
+
+    if group_adjust:
+        weights = weights.groupby(level="date", group_keys=False).apply(
+            to_weights, False
+        )
+
+    weighted_returns = factor_data[
+        utils.get_forward_returns_columns(factor_data.columns)
+    ].multiply(weights, axis=0)
+
+    returns = weighted_returns.groupby(level="date", group_keys=False).sum()
+
+    return returns
 
 def factor_returns_Fama_Macbeth(factor_data, returns_columns='1D', factor_columns=['factor']):
     """
@@ -397,18 +498,23 @@ def factor_alpha_beta(factor_data,
     return alpha_beta
 
 
-def cumulative_returns(returns):
+def cumulative_returns(returns, period=1):
     """
-    Computes cumulative returns from simple daily returns.
+    从'N 期'因子远期收益率构建累积收益
+    当 'period' N 大于 1 时, 建立平均 N 个交错的投资组合 (在随后的时段 1,2,3，...，N 开始),
+    每个 N 个周期重新调仓, 最后计算 N 个投资组合累积收益的均值。
 
-    Parameters
+    参数
     ----------
     returns: pd.Series
-        pd.Series containing daily factor returns (i.e. '1D' returns).
+        N 期因子远期收益序列
+    period: integer
+        对应的因子远期收益时间跨度
 
-    Returns
+    返回值
     -------
-    Cumulative returns series : pd.Series
+    pd.Series
+        累积收益序列
         Example:
             2015-01-05   1.001310
             2015-01-06   1.000805
@@ -416,7 +522,42 @@ def cumulative_returns(returns):
             2015-01-08   0.999200
     """
 
-    return ep.cum_returns(returns, starting_value=1)
+    returns = returns.fillna(0)
+
+    if period == 1:
+        return ep.cum_returns(returns, starting_value=1)
+    #
+    # 构建 N 个交错的投资组合， TODO：debug
+    #
+
+    def split_portfolio(ret, period):
+        return pd.DataFrame(np.diag(ret))
+
+    sub_portfolios = returns.groupby(
+        np.arange(len(returns.index)) // period, axis=0
+    ).apply(split_portfolio, period)
+    sub_portfolios.index = returns.index
+
+    #
+    # 将 N 期收益转换为 1 期收益, 方便计算累积收益
+    #
+
+    def rate_of_returns(ret, period):
+        return ((np.nansum(ret) + 1) ** (1.0 / period)) - 1
+
+    sub_portfolios = utils.rolling_apply(
+        sub_portfolios,
+        window=period,
+        func=rate_of_returns,
+        min_periods=1,
+        args=(period,),
+    )
+    sub_portfolios = sub_portfolios.add(1).cumprod()
+
+    #
+    # 求 N 个投资组合累积收益均值
+    #
+    return sub_portfolios.mean(axis=1)
 
 
 def positions(weights, period, freq=None):
@@ -515,6 +656,40 @@ def positions(weights, period, freq=None):
         portfolio_weights.loc[curr_time] = tot_weights
 
     return portfolio_weights.fillna(0)
+
+
+def weighted_mean_return(factor_data, grouper):
+    """计算(年化)加权平均/标准差"""
+    forward_returns_columns = utils.get_forward_returns_columns(factor_data.columns)
+
+    def agg(values, weights):
+        count = len(values)
+        average = np.average(values, weights=weights, axis=0)
+        # Fast and numerically precise
+        variance = (
+            np.average((values - average) ** 2, weights=weights, axis=0)
+            * count
+            / max((count - 1), 1)
+        )
+        return pd.Series(
+            [average, np.sqrt(variance), count], index=["mean", "std", "count"]
+        )
+
+    group_stats = factor_data.groupby(grouper)[
+        forward_returns_columns.append(pd.Index(["weights"]))
+    ].apply(
+        lambda x: x[forward_returns_columns].apply(
+            agg, weights=x["weights"].fillna(0.0).values
+        )
+    )
+
+    mean_ret = group_stats.xs("mean", level=-1)
+
+    std_error_ret = group_stats.xs("std", level=-1) / np.sqrt(
+        group_stats.xs("count", level=-1)
+    )
+
+    return mean_ret, std_error_ret
 
 
 def mean_return_by_quantile(factor_data,
@@ -618,16 +793,22 @@ def compute_mean_returns_spread(mean_returns,
         if std_err is None, this will be None
     """
 
-    mean_return_difference = mean_returns.xs(upper_quant,
-                                             level='factor_quantile') \
-        - mean_returns.xs(lower_quant, level='factor_quantile')
-
-    if std_err is None:
-        joint_std_err = None
+    if isinstance(mean_returns.index, pd.MultiIndex):
+        mean_return_difference = mean_returns.xs(
+            upper_quant, level="factor_quantile"
+        ) - mean_returns.xs(lower_quant, level="factor_quantile")
     else:
-        std1 = std_err.xs(upper_quant, level='factor_quantile')
-        std2 = std_err.xs(lower_quant, level='factor_quantile')
-        joint_std_err = np.sqrt(std1**2 + std2**2)
+        mean_return_difference = (
+                mean_returns.loc[upper_quant] - mean_returns.loc[lower_quant]
+        )
+
+    if isinstance(std_err.index, pd.MultiIndex):
+        std1 = std_err.xs(upper_quant, level="factor_quantile")
+        std2 = std_err.xs(lower_quant, level="factor_quantile")
+    else:
+        std1 = std_err.loc[upper_quant]
+        std2 = std_err.loc[lower_quant]
+    joint_std_err = np.sqrt(std1 ** 2 + std2 ** 2)
 
     return mean_return_difference, joint_std_err
 
@@ -665,7 +846,7 @@ def quantile_turnover(quantile_factor, quantile, period=1):
     return quant_turnover
 
 
-def factor_rank_autocorrelation(factor_data, period=1):
+def factor_rank_autocorrelation(factor_data, period=1, rank=True):
     """
     Computes autocorrelation of mean factor ranks in specified time spans.
     We must compare period to period factor ranks rather than factor values
@@ -693,7 +874,10 @@ def factor_rank_autocorrelation(factor_data, period=1):
     """
     grouper = [factor_data.index.get_level_values('date')]
 
-    ranks = factor_data.groupby(grouper)['factor'].rank()
+    if rank:
+        ranks = factor_data.groupby(grouper, group_keys=False)[["factor"]].rank()
+    else:
+        ranks = factor_data[["factor"]]
 
     asset_factor_rank = ranks.reset_index().pivot(index='date',
                                                   columns='asset',
@@ -816,10 +1000,62 @@ def common_start_returns(factor,
                 .index.get_level_values('asset')
             equities_slice = list(set(equities_slice) | set(demean_equities))
 
+        # TODO: weighted，可以额外传入数据
         series = returns.loc[returns.index[starting_index:ending_index],
                              equities_slice]
         series.index = range(starting_index - day_zero_index,
                              ending_index - day_zero_index)
+
+        if demean_by is not None:
+            mean = series.loc[:, demean_equities].mean(axis=1)
+            series = series.loc[:, equities]
+            series = series.sub(mean, axis=0)
+
+        if mean_by_date:
+            series = series.mean(axis=1)
+
+        all_returns.append(series)
+
+    return pd.concat(all_returns, axis=1)
+
+
+
+def common_start_returns_own(
+    factor, prices, before, after, cumulative=False, mean_by_date=False, demean_by=None
+):
+    if cumulative:
+        returns = prices
+    else:
+        returns = prices.pct_change(axis=0)
+
+    all_returns = []
+
+    for timestamp, df in factor.groupby(level="date"):
+        equities = df.index.get_level_values("asset")
+
+        try:
+            day_zero_index = returns.index.get_loc(timestamp)
+        except KeyError:
+            continue
+
+        starting_index = max(day_zero_index - before, 0)
+        ending_index = min(day_zero_index + after + 1, len(returns.index))
+
+        equities_slice = set(equities)
+        if demean_by is not None:
+            demean_equities = demean_by.loc[timestamp].index.get_level_values("asset")
+            equities_slice |= set(demean_equities)
+
+        # TODO: weighted，可以额外传入数据
+        series = returns.loc[
+            returns.index[starting_index:ending_index], list(equities_slice)
+        ]
+        series.index = range(
+            starting_index - day_zero_index, ending_index - day_zero_index
+        )
+
+        if cumulative:
+            series = (series / series.loc[0, :]) - 1
 
         if demean_by is not None:
             mean = series.loc[:, demean_equities].mean(axis=1)

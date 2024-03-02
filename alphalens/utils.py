@@ -82,6 +82,115 @@ def non_unique_bin_edges_error(func):
 
 
 @non_unique_bin_edges_error
+def cut_factor(
+    factor_data,
+    quantiles=5,
+    bins=None,
+    topK=None,
+    topPercentage=None,
+    by_group=False,
+    no_raise=False,
+    zero_aware=False,
+):
+    """
+    计算每期因子分位数
+
+    参数
+    ----------
+    factor_data : pd.DataFrame - MultiIndex
+        一个 DataFrame, index 为日期 (level 0) 和资产(level 1) 的 MultiIndex,
+        values 包括因子的值, 各期因子远期收益, 因子分位数,
+        因子分组(可选), 因子权重(可选)
+    quantiles : int or sequence[float]
+        在因子分组中按照因子值大小平均分组的组数。
+         或分位数序列, 允许不均匀分组
+        例如 [0, .10, .5, .90, 1.] 或 [.05, .5, .95]
+        'quantiles' 和 'bins' 有且只能有一个不为 None
+    bins : int or sequence[float]
+        在因子分组中使用的等宽 (按照因子值) 区间的数量
+        或边界值序列, 允许不均匀的区间宽度
+        例如 [-4, -2, -0.5, 0, 10]
+        'quantiles' 和 'bins' 有且只能有一个不为 None
+    topK: int, 按因子排序后选入的股票数量
+    topPercentage: float, 按因子排序后选入的股票百分比——(0, 100)
+    by_group : bool
+        如果是 True, 按照 group 分别计算分位数
+    no_raise: bool, optional
+        如果为 True，则不抛出任何异常，并且将抛出异常的值设置为 np.NaN
+    zero_aware : bool, optional
+        如果为True，则分别为正负因子值计算分位数。
+        适用于您的信号聚集并且零是正值和负值的分界线的情况.
+
+    返回值
+    -------
+    factor_quantile : pd.Series
+        index 为日期 (level 0) 和资产(level 1) 的因子分位数
+    """
+    none_num = sum(int(x is not None) for x in [quantiles, bins, topK, topPercentage])
+    if not (none_num == 1):
+        print("None_sum:", none_num)
+        print("quantiles:", quantiles)
+        print("bins:", bins)
+        print("topK:", topK)
+        print("topPercentage:", topPercentage)
+        raise ValueError("[quantiles, bins, topPercentage, topK]中必须有且仅有一个不为None")
+
+    if zero_aware and not (isinstance(quantiles, int) or isinstance(bins, int)):
+        msg = "只有 quantiles 或 bins 为 int 类型时， 'zero_aware' 才能为 True"
+        raise ValueError(msg)
+
+    def cut_calc(x, _quantiles, _bins, _topK, _topPercentage, _zero_aware, _no_raise):
+        try:
+            if _quantiles is not None and _bins is None and not _zero_aware:
+                return pd.qcut(x, _quantiles, labels=False) + 1
+            elif _quantiles is not None and _bins is None and _zero_aware:
+                pos_quantiles = (
+                    pd.qcut(x[x >= 0], _quantiles // 2, labels=False)
+                    + _quantiles // 2
+                    + 1
+                )
+                neg_quantiles = pd.qcut(x[x < 0], _quantiles // 2, labels=False) + 1
+                return pd.concat([pos_quantiles, neg_quantiles]).sort_index()
+            elif _bins is not None and _quantiles is None and not _zero_aware:
+                return pd.cut(x, _bins, labels=False) + 1
+            elif _bins is not None and _quantiles is None and _zero_aware:
+                pos_bins = pd.cut(x[x >= 0], _bins // 2, labels=False) + _bins // 2 + 1
+                neg_bins = pd.cut(x[x < 0], _bins // 2, labels=False) + 1
+                return pd.concat([pos_bins, neg_bins]).sort_index()
+            elif _topK is not None and _topPercentage is None:
+                iorder = np.argsort(x.values)
+                selected = np.ones_like(x.values)
+                n = min(_topK, len(x))
+                selected[iorder[-n:]] = 0
+                res = pd.Series(selected, index=x.index) + 1
+                return res
+            elif _topK is None and _topPercentage is not None:
+                iorder = np.argsort(x.values)
+                selected = np.ones_like(x.values)
+                n = int(_topPercentage/100 * len(x))
+                selected[iorder[-n:]] = 0
+                res = pd.Series(selected, index=x.index) + 1
+                return res
+        except Exception as e:
+            if _no_raise:
+                return pd.Series(index=x.index)
+            raise e
+
+    grouper = [factor_data.index.get_level_values("date")]
+    if by_group:
+        if "group" not in factor_data.columns:
+            raise ValueError("只有输入了 groupby 参数时 binning_by_group 才能为 True")
+        grouper.append("group")
+
+    factor_quantile = factor_data.groupby(grouper, group_keys=False)["factor"].apply(
+        cut_calc, quantiles, bins, topK, topPercentage, zero_aware, no_raise
+    )
+    factor_quantile.name = "factor_quantile"
+
+    return factor_quantile.dropna()
+
+
+@non_unique_bin_edges_error
 def quantize_factor(factor_data,
                     quantiles=5,
                     bins=None,
@@ -530,8 +639,12 @@ def demean_forward_returns(factor_data, grouper=None):
         grouper = factor_data.index.get_level_values('date')
 
     cols = get_forward_returns_columns(factor_data.columns)
-    factor_data[cols] = factor_data.groupby(grouper, group_keys=False)[cols] \
-        .transform(lambda x: x - x.mean())
+    factor_data[cols] = factor_data.groupby(grouper, as_index=False)[
+        cols.append(pd.Index(["weights"]))].apply(
+        lambda x: x[cols].subtract(
+            np.average(x[cols], axis=0, weights=x["weights"].fillna(0.0).values), axis=1
+        )
+    )
 
     return factor_data
 
@@ -568,6 +681,258 @@ def print_table(table, name=None, fmt=None):
 
     if fmt is not None:
         pd.set_option('display.float_format', prev_option)
+
+
+def get_weight_type(weight_code, asset_code, group_code):
+    # TODO
+    return 'asset'
+
+
+def get_clean_factor_own(
+    factor,
+    forward_returns,
+    groupby = None,
+    weights = None,
+    binning_by_group = False,
+    quantiles = 5,
+    bins = None,
+    topK = None,
+    topPercentage=None,
+    max_loss = 0.35,
+    zero_aware = False,
+) -> pd.DataFrame:
+    """
+    将因子值, 因子远期收益, 因子分组数据, 因子权重数据
+    格式化为以时间和资产的 MultiIndex 作为索引的 DataFrame.
+
+    参数
+    ----------
+    factor : pd.Series - MultiIndex
+        一个 Series, index 为日期 (level 0) 和资产(level 1) 的 MultiIndex,
+        values 为因子的值
+    forward_returns : pd.DataFrame - MultiIndex
+        一个 DataFrame, index 为日期 (level 0) 和资产(level 1) 的 MultiIndex,
+        values 为因子的远期收益, columns 为因子远期收益的期数.
+    groupby : pd.Series - MultiIndex or dict
+        index 为日期和资产的 Series，为每个资产每天的分组，或资产-分组映射的字典.
+        如果传递了dict，则假定分组映射在整个时间段内保持不变.
+    weights : pd.Series - MultiIndex or dict
+        index 为日期和资产的 Series，为每个资产每天的权重，或资产-权重映射的字典.
+        如果传递了dict，则假定权重映射在整个时间段内保持不变.
+        TODO: 为实现行业权重配置，添加支持group weight，根据index(level 1)取值，判断是资产权重还是group权重
+        最终输出不变，保证每date每factor_quantile权重加总为1
+    binning_by_group : bool
+        如果为 True, 则对每个组分别计算分位数.
+        适用于因子值范围在各个组上变化很大的情况.
+        如果要分析分组(行业)中性的组合, 您最好设置为 True
+    quantiles : int or sequence[float]
+        在因子分组中按照因子值大小平均分组的组数。
+         或分位数序列, 允许不均匀分组
+        例如 [0, .10, .5, .90, 1.] 或 [.05, .5, .95]
+        'quantiles' 和 'bins' 有且只能有一个不为 None
+    bins : int or sequence[float]
+        在因子分组中使用的等宽 (按照因子值) 区间的数量
+        或边界值序列, 允许不均匀的区间宽度
+        例如 [-4, -2, -0.5, 0, 10]
+        'quantiles' 和 'bins' 有且只能有一个不为 None
+    max_loss : float, optional
+        允许的丢弃因子数据的最大百分比 (0.00 到 1.00),
+        计算比较输入因子索引中的项目数和输出 DataFrame 索引中的项目数.
+        因子数据本身存在缺陷 (例如 NaN),
+        没有提供足够的价格数据来计算所有因子值的远期收益，
+        或者因为分组失败, 因此可以部分地丢弃因子数据
+        设置 max_loss = 0 以停止异常捕获.
+    zero_aware : bool, optional
+        如果为True，则分别为正负因子值计算分位数。
+        适用于您的信号聚集并且零是正值和负值的分界线的情况.
+
+    返回值
+    -------
+    merged_data : pd.DataFrame - MultiIndex
+        一个 DataFrame, index 为日期 (level 0) 和资产(level 1) 的 MultiIndex,
+        values 包括因子的值, 各期因子远期收益, 因子分位数,
+        因子分组(可选), 因子权重(可选)
+        - 各期因子远期收益的列名满足 'period_1', 'period_5' 的格式
+    """
+
+    initial_amount: int = len(factor.index)
+
+    factor_copy: pd.DataFrame = factor.copy()
+    factor_copy.index = factor_copy.index.rename(["date", "asset"])
+    asset_code = factor_copy.index.get_level_values("asset")
+
+    merged_data: pd.DataFrame = forward_returns.copy()
+    merged_data["factor"] = factor_copy
+
+    if groupby is not None:
+        if isinstance(groupby, dict):
+            diff = set(asset_code) - set(groupby.keys())
+            if len(diff) > 0:
+                raise KeyError("Assets {} not in group mapping".format(list(diff)))
+
+            ss = pd.Series(groupby)
+            groupby = pd.Series(index=factor_copy.index, data=ss[asset_code].values,)
+        elif isinstance(groupby, pd.DataFrame):
+            groupby = groupby.stack()
+        merged_data["group"] = groupby
+        group_code = set(groupby.values.tolist())
+
+    if weights is not None:
+        if isinstance(weights, dict):
+            weight_code = set(weights.keys())
+            diff = set(asset_code) - weight_code
+            if len(diff) > 0:
+                raise KeyError("Assets {} not in weights mapping".format(list(diff)))
+
+            ww = pd.Series(weights)
+            weights = pd.Series(
+                index=factor_copy.index,
+                data=ww[asset_code].values,
+            )
+        elif isinstance(weights, pd.DataFrame):
+            weight_code = set(weights.index.get_level_values(-1))
+            weights = weights.stack()
+        if groupby is not None:
+            weights_type = get_weight_type(weight_code, asset_code, group_code)
+        else:
+            weights_type = 'asset'
+        if weights_type == 'asset':
+            # 如果给定的是资产的权重，逻辑不变
+            merged_data["weights"] = weights
+        elif weights_type == 'group':
+            # 如果给定的是group的权重
+            group_weights = weights.reset_index()
+            group_weights.columns = ['date', 'group', 'weights']
+            merged_data['date'] = merged_data.index.get_level_values(level='date')
+            merged_data = merged_data.merge(group_weights, on=['date', 'group'], how='left')
+
+    merged_data = merged_data.dropna()
+
+    # quantile_data = quantize_factor(
+    #     merged_data, quantiles, bins, binning_by_group, True, zero_aware
+    # )
+    quantile_data = cut_factor(merged_data, quantiles, bins, topK, topPercentage, binning_by_group, True, zero_aware)
+
+    merged_data["factor_quantile"] = quantile_data
+    merged_data = merged_data.dropna()
+    merged_data["factor_quantile"] = merged_data["factor_quantile"].astype(int)
+
+    if "weights" in merged_data.columns:
+        if weights_type == 'asset':
+            merged_data["weights"] = (
+                merged_data.set_index("factor_quantile", append=True)
+                .groupby(level=["date", "factor_quantile"], group_keys=False)["weights"]
+                .apply(lambda s: s.divide(s.sum()))
+                .reset_index("factor_quantile", drop=True)
+            )
+        elif weights_type == 'group':
+            # TODO: 如果有group weight，每天每个factor_quantile每个group加总weight应该是当天当group的weight
+            # 待检验每天每个factor_quantile加总为1; binning_by_group分别为True/False下
+            merged_data["weights"] = (
+                merged_data.set_index("factor_quantile", append=True)
+                .groupby(level=["date", "factor_quantile", "group"], group_keys=False)["weights"]
+                .apply(lambda s: s / len(s))
+                .reset_index("factor_quantile", drop=True)
+            )
+
+    binning_amount = float(len(merged_data.index))
+
+    tot_loss = (initial_amount - binning_amount) / initial_amount
+
+    no_raise = True if max_loss == 0 else False
+    if tot_loss > max_loss and not no_raise:
+        message = "max_loss (%.1f%%) 超过 %.1f%%" % (tot_loss * 100, max_loss * 100)
+        raise MaxLossExceededError(message)
+
+    return merged_data
+
+
+def get_clean_factor_and_forward_returns_own(
+    factor: pd.Series,
+    prices: pd.DataFrame,
+    groupby = None,
+    weights = None,
+    binning_by_group: bool = False,
+    quantiles: int = 5,
+    bins: int = None,
+    topK: int = None,
+    topPercentage: float=None,
+    periods = (1, 5, 10),
+    max_loss: float = 0.35,
+    zero_aware: bool = False,
+):
+    """
+    将因子数据, 价格数据, 分组映射和权重映射格式化为
+    由包含时间和资产的 MultiIndex 作为索引的 DataFrame
+
+    参数
+    ----------
+    factor : pd.Series - MultiIndex
+     一个 Series, index 为日期 (level 0) 和资产(level 1) 的 MultiIndex,
+        values 为因子的值
+    prices : pd.DataFrame
+        用于计算因子远期收益的价格数据
+        columns 为资产, index 为 日期.
+        价格数据必须覆盖因子分析时间段以及额外远期收益计算中的最大预期期数.
+    groupby : pd.Series - MultiIndex or dict
+        index 为日期和资产的 Series，为每个资产每天的分组，或资产-分组映射的字典.
+        如果传递了dict，则假定分组映射在整个时间段内保持不变.
+    weights : pd.Series - MultiIndex or dict
+        index 为日期和资产的 Series，为每个资产每天的权重，或资产-权重映射的字典.
+        如果传递了dict，则假定权重映射在整个时间段内保持不变.
+    binning_by_group : bool
+        如果为 True, 则对每个组分别计算分位数.
+        适用于因子值范围在各个组上变化很大的情况.
+        如果要分析分组(行业)中性的组合, 您最好设置为 True
+    quantiles : int or sequence[float]
+        在因子分组中按照因子值大小平均分组的组数。
+         或分位数序列, 允许不均匀分组
+        例如 [0, .10, .5, .90, 1.] 或 [.05, .5, .95]
+        'quantiles' 和 'bins' 有且只能有一个不为 None
+    bins : int or sequence[float]
+        在因子分组中使用的等宽 (按照因子值) 区间的数量
+        或边界值序列, 允许不均匀的区间宽度
+        例如 [-4, -2, -0.5, 0, 10]
+        'quantiles' 和 'bins' 有且只能有一个不为 None
+    periods : sequence[int]
+        远期收益的期数
+    max_loss : float, optional
+        允许的丢弃因子数据的最大百分比 (0.00 到 1.00),
+        计算比较输入因子索引中的项目数和输出 DataFrame 索引中的项目数.
+        因子数据本身存在缺陷 (例如 NaN),
+        没有提供足够的价格数据来计算所有因子值的远期收益，
+        或者因为分组失败, 因此可以部分地丢弃因子数据
+        设置 max_loss = 0 以停止异常捕获.
+    zero_aware : bool, optional
+        如果为True，则分别为正负因子值计算分位数。
+        适用于您的信号聚集并且零是正值和负值的分界线的情况.
+
+    返回值
+    -------
+    merged_data : pd.DataFrame - MultiIndex
+        一个 DataFrame, index 为日期 (level 0) 和资产(level 1) 的 MultiIndex,
+        values 包括因子的值, 各期因子远期收益, 因子分位数,
+        因子分组(可选), 因子权重(可选)
+        - 各期因子远期收益的列名满足 'period_1', 'period_5' 的格式
+    """
+
+    forward_returns: pd.DataFrame = compute_forward_returns(factor, prices, periods)
+
+    factor_data = get_clean_factor(
+        factor,
+        forward_returns,
+        groupby=groupby,
+        weights=weights,
+        quantiles=quantiles,
+        bins=bins,
+        topK=topK,
+        topPercentage=topPercentage,
+        binning_by_group=binning_by_group,
+        max_loss=max_loss,
+        zero_aware=zero_aware,
+    )
+
+    return factor_data
 
 
 def get_clean_factor(factor,
@@ -1436,7 +1801,7 @@ def get_clean_factor_and_backward_returns(factor,
     return factor_data
 
 
-def rate_of_return(period_ret, base_period):
+def rate_of_return(period_ret, base_period='1D'):
     """
     Convert returns to 'one_period_len' rate of returns: that is the value the
     returns would have every 'one_period_len' if they had grown at a steady
@@ -1464,7 +1829,7 @@ def rate_of_return(period_ret, base_period):
     return period_ret.add(1).pow(conversion_factor).sub(1)
 
 
-def std_conversion(period_std, base_period):
+def std_conversion(period_std, base_period='1D'):
     """
     one_period_len standard deviation (or standard error) approximation
 
@@ -1511,6 +1876,18 @@ def get_forward_returns_columns(columns, require_exact_day_multiple=False):
         valid_columns = [(pattern.match(col) is not None) for col in columns]
 
     return columns[valid_columns]
+
+
+def get_forward_returns_columns_own(columns):
+    syntax = re.compile("^period_\\d+$")
+    return columns[columns.astype('str').str.contains(syntax, regex=True)]
+
+
+def convert_to_forward_returns_columns(period):
+    try:
+        return 'period_{:d}'.format(period)
+    except ValueError:
+        return period
 
 
 def timedelta_to_string(timedelta):
@@ -1633,3 +2010,65 @@ def diff_custom_calendar_timedeltas(start, end, freq):
     delta_days = timediff.components.days - actual_days
     return timediff - pd.Timedelta(days=delta_days)
 
+
+PD_VERSION = pd.__version__
+
+
+def rolling_apply(
+    x,
+    window,
+    func,
+    min_periods=None,
+    freq=None,
+    center=False,
+    args=None,
+    kwargs=None
+):
+    if args is None:
+        args = tuple()
+    if kwargs is None:
+        kwargs = dict()
+
+    if PD_VERSION >= '0.23.0':
+        return x.rolling(
+            window, min_periods=min_periods, center=center
+        ).apply(
+            func, False, args=args, kwargs=kwargs
+        )
+    elif PD_VERSION >= '0.18.0':
+        return x.rolling(
+            window, min_periods=min_periods, center=center
+        ).apply(
+            func, args=args, kwargs=kwargs
+        )
+    else:
+        return pd.rolling_apply(
+            x,
+            window,
+            func,
+            min_periods=min_periods,
+            freq=freq,
+            center=center,
+            args=args,
+            kwargs=kwargs
+        )
+
+
+def rolling_mean(x, window, min_periods=None, center=False):
+    if PD_VERSION >= '0.18.0':
+        return x.rolling(window, min_periods=min_periods, center=center).mean()
+    else:
+        return pd.rolling_mean(
+            x, window, min_periods=min_periods, center=center
+        )
+
+
+def rolling_std(x, window, min_periods=None, center=False, ddof=1):
+    if PD_VERSION >= '0.18.0':
+        return x.rolling(
+            window, min_periods=min_periods, center=center
+        ).std(ddof=ddof)
+    else:
+        return pd.rolling_std(
+            x, window, min_periods=min_periods, center=center, ddof=ddof
+        )

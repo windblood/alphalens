@@ -133,7 +133,7 @@ def axes_style(style='darkgrid', rc=None):
 
 def plot_returns_table(alpha_beta,
                        mean_ret_quantile,
-                       mean_ret_spread_quantile, export=False):
+                       mean_ret_spread_quantile, export=False, show=True):
     returns_table = pd.DataFrame()
     returns_table = pd.concat([returns_table, alpha_beta])
     # returns_table = returns_table.append(alpha_beta)
@@ -143,14 +143,14 @@ def plot_returns_table(alpha_beta,
         mean_ret_quantile.iloc[0] * DECIMAL_TO_BPS
     returns_table.loc["Mean Period Wise Spread (bps)"] = \
         mean_ret_spread_quantile.mean() * DECIMAL_TO_BPS
-
-    print("Returns Analysis")
-    utils.print_table(returns_table.apply(lambda x: x.round(3)))
+    if show:
+        print("Returns Analysis")
+        utils.print_table(returns_table.apply(lambda x: x.round(3)))
     if export:
         return returns_table
 
 
-def plot_turnover_table(autocorrelation_data, quantile_turnover, export=False):
+def plot_turnover_table(autocorrelation_data, quantile_turnover, export=False, show=True):
     turnover_table = pd.DataFrame()
     for period in sorted(quantile_turnover.keys()):
         # for quantile, p_data in quantile_turnover[period].iteritems():
@@ -163,40 +163,45 @@ def plot_turnover_table(autocorrelation_data, quantile_turnover, export=False):
         auto_corr.loc["Mean Factor Rank Autocorrelation",
                       "{}D".format(period)] = p_data.mean()
 
-    print("Turnover Analysis")
-    utils.print_table(turnover_table.apply(lambda x: x.round(3)))
-    utils.print_table(auto_corr.apply(lambda x: x.round(3)))
+    if show:
+        print("Turnover Analysis")
+        utils.print_table(turnover_table.apply(lambda x: x.round(3)))
+        utils.print_table(auto_corr.apply(lambda x: x.round(3)))
     if export:
         return turnover_table, auto_corr
 
 
-def plot_information_table(ic_data, export=False):
+def plot_information_table(ic_data, export=False, show=True):
     ic_summary_table = pd.DataFrame()
     ic_summary_table["IC Mean"] = ic_data.mean()
     ic_summary_table["IC Std."] = ic_data.std()
-    ic_summary_table["Risk-Adjusted IC"] = \
-        ic_data.mean() / ic_data.std()
+    ic_summary_table["Risk-Adjusted IC"] = ic_data.mean() / ic_data.std()
+    ic_summary_table["IC>0 Rate"] = (ic_data > 0).sum() / ic_data.count()
+    ic_summary_table["|IC|>0.02 Rate"] = (ic_data.abs() > 0.02).sum() / ic_data.count()
+
     t_stat, p_value = stats.ttest_1samp(ic_data, 0)
     ic_summary_table["t-stat(IC)"] = t_stat
     ic_summary_table["p-value(IC)"] = p_value
     ic_summary_table["IC Skew"] = stats.skew(ic_data)
     ic_summary_table["IC Kurtosis"] = stats.kurtosis(ic_data)
 
-    print("Information Analysis")
-    utils.print_table(ic_summary_table.apply(lambda x: x.round(3)).T)
+    if show:
+        print("Information Analysis")
+        utils.print_table(ic_summary_table.apply(lambda x: x.round(3)).T)
     if export:
         return ic_summary_table
 
 
-def plot_quantile_statistics_table(factor_data, export=False):
+def plot_quantile_statistics_table(factor_data, export=False, show=True):
     factor_data = factor_data.select_dtypes(exclude='category')
-    quantile_stats = factor_data.groupby('factor_quantile') \
-        .agg(['min', 'max', 'mean', 'std', 'count'])['factor']
+    quantile_stats = factor_data.groupby('factor_quantile')['factor'].agg(
+        ['min', 'max', 'mean', 'std', 'count'])
     quantile_stats['count %'] = quantile_stats['count'] \
         / quantile_stats['count'].sum() * 100.
 
-    print("Quantiles Statistics")
-    utils.print_table(quantile_stats)
+    if show:
+        print("Quantiles Statistics")
+        utils.print_table(quantile_stats)
     if export:
         return quantile_stats
 
@@ -1046,3 +1051,37 @@ def plot_events_distribution(events, num_bars=50, ax=None):
            xlabel='Date')
 
     return ax
+
+
+# def plotting_by_streamlit(
+#     figs, use_container_width=True, theme="streamlit"
+# ):
+#     if not isinstance(figs, (list, tuple)):
+#         figs: List[go.Figure] = [figs]
+#     for fig in figs:
+#         st.plotly_chart(fig, use_container_width=use_container_width, theme=theme)
+#
+#
+# def plotting_in_grid(
+#     figs, use_container_width=True, cols=3
+# ):
+#     if not isinstance(figs, (list, tuple)):
+#         figs: List[go.Figure] = [figs]
+#
+#     if len(figs) > 1:
+#         rows: int = (
+#             len(figs) // cols + 1 if len(figs) % cols != 0 else len(figs) // cols
+#         )
+#         figs_iter = iter(figs)
+#         for _ in range(rows):
+#             streamlit_cols = st.columns(cols)
+#
+#             for col in streamlit_cols:
+#                 try:
+#                     fig = next(figs_iter)
+#                 except StopIteration:
+#                     break
+#                 col.plotly_chart(fig, use_container_width=use_container_width)
+#
+#     else:
+#         plotting_by_streamlit(figs, use_container_width=use_container_width)
