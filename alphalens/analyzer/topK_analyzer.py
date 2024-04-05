@@ -97,30 +97,40 @@ class TopKAnalyzer(FactorAnalyzer):
 
 if __name__ == '__main__':
     from data_service import MysqlLoader
-    from analyzer import create_full_tear_sheet
+    from streamlit_analyze import create_full_tear_sheet
     loader = MysqlLoader(host='localhost', port='3306', username='wingtrade',
                          password='wingtrade123', db='factor')
-    factor_list = loader.get_factor_name_list
-    factor_data = loader.get_factor_data(factor_names=factor_list[:2], start_dt='20190101', end_dt='20231231')
+    factor_list = loader.factor_name_list
+    factor_data = loader.get_factor_data(factor_names=factor_list[:2], start_dt='20230901', end_dt='20240229')
     factor_data['trade_date'] = pd.to_datetime(factor_data['trade_date'].astype(str))
     factor_name = factor_list[0]
     factor_ser = (factor_data.set_index(["trade_date", "code"])
                   .query("factor_name==@factor_name")["value"]
                   .sort_index()
                   .dropna())
+
     codes = [x for x in factor_data["code"].unique().tolist() if x is not None]
-    ind_df = loader.get_stock_industry(codes=codes, start_dt='20190101', end_dt='20240217')
-    ind_dict = dict(zip(ind_df['code'], ind_df['ind_code']))
+    ind_df = loader.get_stock_industry(codes=codes, start_dt='20230901', end_dt='20240229')
+    ind_dict = dict(zip(ind_df['code'], ind_df['group']))
     default_dict = {x: '015001' for x in codes if x not in ind_dict}
     ind_dict.update(default_dict)
+
+    # ind weight
+    weights = loader.get_industry_weight(start_dt='20230901', end_dt='20240229')
+
     full_codes = [x + '.SH' if x.startswith('6') else x + '.SZ' for x in codes]
-    stock_price = loader.get_stock_price(codes=full_codes, start_dt='20190101', end_dt='20231231')
+    stock_price = loader.get_stock_price(codes=full_codes, start_dt='20230901', end_dt='20240229')
     stock_price['trade_date'] = pd.to_datetime(stock_price['trade_date'].astype(str))
     pricing: pd.DataFrame = pd.pivot_table(
         stock_price, index="trade_date", columns="code", values='close'
     )
 
     topK = 5
-    factor_analyzer = TopKAnalyzer(factor_ser, prices=pricing, groupby=ind_dict, binning_by_group=True,
-                                   topK=topK, periods=(1,5,10), max_loss=0.98)
+    factor_analyzer = TopKAnalyzer(factor_ser, prices=pricing, groupby=ind_dict,  binning_by_group=True,
+                                   weights=weights, topK=topK, periods=(1, 5, 10), max_loss=0.99)
+    # res1 = factor_analyzer.calc_factor_alpha_beta(group_adjust=True)
+    res21 = factor_analyzer.calc_average_cumulative_return_by_quantile(periods_before=5, periods_after=10,
+                                                                       group_adjust=False, weighted=True)
+    res2 = factor_analyzer.calc_cumulative_return_by_quantile(group_adjust=True)
+    res3 = factor_analyzer.calc_cumulative_returns(group_adjust=True)
     create_full_tear_sheet(factor_analyzer, factor_name)

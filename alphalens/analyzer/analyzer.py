@@ -7,6 +7,8 @@ from abc import abstractmethod
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.io as pio
+from plotly.figure_factory import create_table
 from functools import lru_cache
 from scipy import stats
 from scipy.stats import pearsonr, spearmanr
@@ -1221,6 +1223,118 @@ class FactorAnalyzer(object):
             num_days=num_days,
             full_dates=dates,
         )
+
+    def create_report(self, name, demeaned=False, group_adjust=False) -> None:
+        """ 输出因子报告
+
+        参数:
+        demeaned:
+        - True: 对每日因子收益去均值求得因子收益表
+        - False: 因子收益表
+        group_adjust:
+        - True: 按行业对因子收益去均值后求得因子收益表
+        - False: 因子收益表
+        """
+        with open(f'{name}.html', 'a', encoding='utf8') as f:
+            # 因子各分位统计表
+            tbl = self.plot_quantile_statistics_table(make_pretty=False)
+            tbl = create_table(tbl, index=True, index_title='因子分位数统计')
+            f.write(pio.to_html(tbl, full_html=False))
+            # tbl = self.plot_quantile_statistics_table(make_pretty=True)
+            # f.write(tbl.to_html(header=False))
+            f.write('<br>')
+            f.write('<br>')
+            f.write('<br>')
+
+            # 因子收益表
+            # tbl = self.plot_returns_table(
+            #     demeaned=demeaned, group_adjust=group_adjust, make_pretty=False
+            # )
+            # tbl = create_table(tbl, index=True, index_title='因子收益表')
+            # f.write(pio.to_html(tbl, full_html=False))
+            tbl = self.plot_returns_table(
+                demeaned=demeaned, group_adjust=group_adjust, make_pretty=True
+            )
+            f.write(tbl.to_html(header=False))
+            f.write('<br>')
+            f.write('<br>')
+            f.write('<br>')
+
+            # 因子收益率分布图
+            fig = self.plot_quantile_returns_bar(
+                by_group=False, demeaned=demeaned, group_adjust=group_adjust
+            )
+            f.write(pio.to_html(fig, full_html=False))
+
+            # 因子值加权组合每日累积收益图
+            fig = self.plot_cumulative_returns(
+                period=None, demeaned=demeaned, group_adjust=group_adjust
+            )
+            for fig_ in fig:
+                f.write(pio.to_html(fig_, full_html=False))
+
+            # 分位数每日累积收益图
+            fig = self.plot_cumulative_returns_by_quantile(
+                period=None, demeaned=demeaned, group_adjust=group_adjust
+            )
+            for fig_ in fig:
+                f.write(pio.to_html(fig_, full_html=False))
+
+            # 做多最大分位数做空最小分位数组合每日累积收益图
+            fig = self.plot_top_down_cumulative_returns(
+                period=None, demeaned=demeaned, group_adjust=group_adjust
+            )
+            for fig_ in fig:
+                f.write(pio.to_html(fig_, full_html=False))
+
+            # 高分位减最低分位收益图
+            fig = self.plot_mean_quantile_returns_spread_time_series(
+                demeaned=demeaned, group_adjust=group_adjust
+            )
+            for fig_ in fig:
+                f.write(pio.to_html(fig_, full_html=False))
+
+            # 各分位数收益分布图
+            fig = self.plot_quantile_returns_violin(
+                demeaned=demeaned, group_adjust=group_adjust
+            )
+            f.write(pio.to_html(fig, full_html=False))
+
+            # 信息比率(IC)相关表
+            tbl = self.plot_information_table(group_adjust=group_adjust, make_pretty=True)
+            # tbl = create_table(tbl, index=True, index_title='信息比率表')
+            # f.write(pio.to_html(tbl, full_html=False))
+            f.write(tbl.to_html(header=False))
+
+            fig = self.plot_ic_ts(group_adjust=group_adjust, method=None)
+            if isinstance(fig, list):
+                for fig_ in fig:
+                    f.write(pio.to_html(fig_, full_html=False))
+            else:
+                f.write(pio.to_html(fig, full_html=False))
+            fig = self.plot_cumulative_ic_ts(group_adjust=group_adjust)
+            f.write(pio.to_html(fig, full_html=False))
+
+            # t 统计表
+            tbl = self.plot_tstats_table(make_pretty=False)
+            tbl = create_table(tbl, index=True, index_title='t统计表')
+            f.write(pio.to_html(tbl, full_html=False))
+
+            fig = self.plot_top_bottom_quantile_turnover(periods=self._periods)
+            for fig_ in fig:
+                f.write(pio.to_html(fig_, full_html=False))
+
+            # 换手率表-分组均值; 换手率表-滞后期自相关系数
+            turnover_table, auto_corr = self.plot_turnover_table(make_pretty=False)
+            turnover_table = create_table(turnover_table, index=True, index_title='换手率表')
+            f.write(pio.to_html(turnover_table, full_html=False))
+            auto_corr = create_table(auto_corr, index=True, index_title='自相关表')
+            f.write(pio.to_html(auto_corr, full_html=False))
+
+            figs = self.plot_factor_auto_correlation(periods=self._periods)
+            for fig in figs:
+                f.write(pio.to_html(fig, full_html=False))
+
 
 #     def create_summary_tear_sheet(self, demeaned=False, group_adjust=False) -> None:
 #         """因子值特征分析

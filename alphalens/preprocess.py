@@ -26,10 +26,15 @@ factors : pd.DataFrame - MultiIndex
 @author:
 @date: 2023/9/20
 """
+from concurrent.futures.process import ProcessPoolExecutor
+from concurrent.futures import as_completed
+
+from tqdm import tqdm
 import numpy as np
 import pandas as pd
 from sympy import Matrix, GramSchmidt
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
+import statsmodels.api as sm
 
 
 # na/nan values process
@@ -162,7 +167,74 @@ def get_orthogonal_factors(factors, method='Schimidt'):
         tmp_new.set_index(['date', tmp_new.index], inplace=True)
         new_factors.append(tmp_new)
     new_factors = pd.concat(new_factors)
+    new_factors.sort_values(['date', 'asset'], inplace=True)
     return new_factors
+
+
+def _process(tmp_factor, name, method):
+    factor_names = tmp_factor.columns
+    tmp_new = _single_orthogonal_factors(tmp_factor.values, method=method)
+    tmp_new = pd.DataFrame(tmp_new, index=tmp_factor.index, columns=factor_names)
+    # tmp_new['date'] = name
+    # tmp_new.set_index(['date', tmp_new.index], inplace=True)
+    return tmp_new
+
+
+def get_orthogonal_factors_mp(factors, method='Schimidt'):
+    """
+    get orthogonal factors with each factor is orthogonal to other factors
+
+    Parameters
+    ----------
+    factors : pd.DataFrame - MultiIndex
+
+    method : str
+        Orthogonal method: 'Schimidt', 'Symmetry', 'Canonical'
+
+    Returns
+    -------
+    orthogonal_factors: pd.DataFrame - MultiIndex
+    """
+    groups = factors.groupby(level='date')
+    new_factors = []
+    total_grps = len(groups)
+    finished = 0
+    with tqdm(total=total_grps) as pbar:
+        with ProcessPoolExecutor(max_workers=4) as pool:
+            results = {pool.submit(_process, grp, name, method): name for name, grp in groups}
+
+            for res in as_completed(results):
+                tmp_res = res.result()
+                new_factors.append(tmp_res)
+                finished += 1
+                pbar.update(1)
+
+    new_factors = pd.concat(new_factors)
+    new_factors.sort_values(['date', 'asset'], inplace=True)
+    return new_factors
+
+
+def get_residual(factor, base_factors):
+    """" 单期，线性回归残差 """
+    y = factor.values
+    X = base_factors.values
+    X = sm.add_constant(X)
+    model = sm.OLS(y, X).fit()
+    res = model.resid
+    res = pd.DataFrame(res, index=factor.index, columns=factor.columns)
+    return res
+
+
+def residual_factor(factor, base_factors):
+    dates = factor.index.get_level_values(level='date')
+    res = []
+    for dt in dates:
+        tmp_factor = factor.loc[dt].fillna(value=0)
+        tmp_base = base_factors.loc[dt].reindex(tmp_factor.index).fillna(value=0)
+        tmp_res = get_residual(tmp_factor, tmp_base)
+        res.append(tmp_res)
+    res = pd.concat(res)
+    return res
 
 
 def orthogonal_factor(factor, base_factors, method='Schimidt'):
@@ -204,9 +276,14 @@ if __name__ == '__main__':
     # df_2 = process_outliers(df, method='mad')
     # df_3 = process_outliers(df, method='percentile')
     df1 = normalize(df, method='minmax')
-    df2 = normalize(df, method='zscore')
-    df3 = normalize(df, method='rank')
-    # new_df = get_orthogonal_factors(arr, 'Schimidt')
+    # df2 = normalize(df, method='zscore')
+    # df3 = normalize(df, method='rank')
     f6 = pd.DataFrame(np.random.randn(1000, 1), index=indices, columns=['f6'])
-    new_f6 = orthogonal_factor(f6, df, 'Canonical')
+    df_res = get_residual(f6, df)
+    new_df = get_orthogonal_factors(df1, 'Schimidt')
+    print(new_df.head())
+    new_df2 = get_orthogonal_factors_mp(df1, 'Schimidt')
+    print(new_df2.head())
+    print(np.testing.assert_almost_equal(new_df.values, new_df2.values))
+    # new_f6 = orthogonal_factor(f6, df, 'Canonical')
     print('ok')
