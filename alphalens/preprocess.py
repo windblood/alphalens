@@ -214,7 +214,7 @@ def get_orthogonal_factors_mp(factors, method='Schimidt'):
     return new_factors
 
 
-def get_residual(factor, base_factors):
+def get_residual(factor, base_factors, dt=None):
     """" 单期，线性回归残差 """
     y = factor.values
     X = base_factors.values
@@ -222,18 +222,28 @@ def get_residual(factor, base_factors):
     model = sm.OLS(y, X).fit()
     res = model.resid
     res = pd.DataFrame(res, index=factor.index, columns=factor.columns)
+    if dt is not None:
+        res['date'] = dt
+        res = res.set_index('date', append=True).swaplevel()
     return res
 
 
 def residual_factor(factor, base_factors):
-    dates = factor.index.get_level_values(level='date')
+    dates = factor.index.unique(level='date')
     res = []
-    for dt in dates:
-        tmp_factor = factor.loc[dt].fillna(value=0)
-        tmp_base = base_factors.loc[dt].reindex(tmp_factor.index).fillna(value=0)
-        tmp_res = get_residual(tmp_factor, tmp_base)
-        res.append(tmp_res)
+    with ProcessPoolExecutor(max_workers=4) as pool:
+        jobs = []
+        for dt in dates:
+            tmp_factor = factor.loc[dt].fillna(value=0)
+            tmp_base = base_factors.loc[dt].reindex(tmp_factor.index).fillna(value=0)
+            future = pool.submit(get_residual, tmp_factor, tmp_base, dt)
+            jobs.append(future)
+
+        for future in as_completed(jobs):
+            res.append(future.result())
+
     res = pd.concat(res)
+    res.sort_index(level=['date', 'code'], inplace=True)
     return res
 
 
