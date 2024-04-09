@@ -148,7 +148,7 @@ def list_factors():
     return []
 
 
-def load_factor(factor_name):
+def load_factor(factor_name, start_date, end_date):
     return pd.DataFrame()
 
 
@@ -256,23 +256,20 @@ def backtests_report(cfg):
     else:
         groupby = None
 
-    weights = cfg.get('weights', False)
+    weights = cfg.get('weights', False)   # TODO: bench weight sign
     if weights:
         weights = dataloader.get_industry_weight(start_dt=start_date, end_dt=end_date)
     else:
         weights = 1.0
 
     bench_factors = dataloader.get_factor_data(bench_factors, start_dt=start_date, end_dt=end_date)
+    bench_factors = bench_factors.groupby(level='code').ffill()
     prices = dataloader.get_stock_price(start_dt=start_date, end_dt=end_date)
     prices['date'] = pd.to_datetime(prices['date'].astype(str))
-    prices = pd.pivot_table(prices, index="date", columns="code", values='close')
-    # groupby fill na
-
-    bench_factors = bench_factors.groupby(level='code').ffill()
-    prices.ffill(inplace=True)
 
     bench_bt = Backtest(factors=bench_factors, prices=prices, group=groupby, group_weight=weights,
-                        factor_weight=None, initial_asset=10000000)
+                        factor_weight=config.style_weights, initial_asset=10000000)
+    bench_bt.run()
     perfs = {}
     perfs['benchmark'] = analyze_account(bench_bt.accounts)
 
@@ -285,6 +282,7 @@ def backtests_report(cfg):
         factor_bt = Backtest(factors=bench_factors.merge(target_factor, left_index=True, right_index=True),
                              prices=prices, group=groupby, group_weight=weights, factor_weight=None,
                              initial_asset=10000000)
+        factor_bt.run()
         perfs[factor_name] = analyze_account(factor_bt.accounts)
     return perfs
 

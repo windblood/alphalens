@@ -72,12 +72,24 @@ class Backtest:
     def fill_dates(self, sr):
         if sr is None:
             return None
-        value_name = sr.name
-        col_name = sr.index.names[-1]
-        sr = sr.reset_index().pivot(index='date', columns=col_name, values=value_name)
-        sr = sr.reindex(self.dates).ffill().bfill()
-        sr = sr.melt(var_name=col_name, value_name=value_name, ignore_index=False).set_index(col_name, append=True)
-        return sr[value_name]
+        if isinstance(sr, dict) or (isinstance(sr, pd.Series) and sr.index.ndim == 1):
+            sr_index = sr.index if isinstance(sr, pd.Series) else list(sr.keys())
+            df = pd.DataFrame(index=self.dates, columns=sr_index)
+            for idx in sr_index:
+                df[idx] = sr[idx]
+            sr = df
+            sr = sr.melt(var_name='group', value_name='value', ignore_index=False).set_index('group', append=True)
+            sr = sr['value']
+        elif isinstance(sr, pd.Series) and sr.index.ndim > 1:
+            value_name = sr.name
+            col_name = sr.index.names[-1]
+            sr = sr.reset_index().pivot(index='date', columns=col_name, values=value_name)
+            sr = sr.reindex(self.dates).ffill().bfill()
+            sr = sr.melt(var_name=col_name, value_name=value_name, ignore_index=False).set_index(col_name, append=True)
+            sr = sr[value_name]
+        else:
+            return sr
+        return sr
 
     def is_rebalance(self, holding_account, rebalance_period=9):
         if holding_account == 0:
