@@ -5,9 +5,9 @@ from typing import Callable, Dict, List, Tuple, Union
 
 import numpy as np
 import pandas as pd
-from .prepare import get_clean_factor_and_forward_returns
+from prepare import get_clean_factor_and_forward_returns
 from .analyzer import FactorAnalyzer
-from .utils import convert_to_forward_returns_columns, ensure_tuple
+from utils import convert_to_forward_returns_columns, ensure_tuple
 
 
 class ClassicAnalyzer(FactorAnalyzer):

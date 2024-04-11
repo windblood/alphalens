@@ -253,12 +253,14 @@ def backtests_report(cfg):
     groupby = cfg.get('groupby', False)
     if groupby:
         groupby = dataloader.get_stock_industry(start_dt=start_date, end_dt=end_date)
+        groupby.set_index(['date', 'group'], inplace=True)
     else:
         groupby = None
 
-    weights = cfg.get('weights', False)   # TODO: bench weight sign
+    weights = cfg.get('weights', False)
     if weights:
         weights = dataloader.get_industry_weight(start_dt=start_date, end_dt=end_date)
+        weights.set_index(['date', 'group'], inplace=True)
     else:
         weights = 1.0
 

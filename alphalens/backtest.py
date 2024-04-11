@@ -72,7 +72,7 @@ class Backtest:
     def fill_dates(self, sr):
         if sr is None:
             return None
-        if isinstance(sr, dict) or (isinstance(sr, pd.Series) and sr.index.ndim == 1):
+        if isinstance(sr, dict) or (isinstance(sr, pd.Series) and (not isinstance(sr.index, pd.MultiIndex))):
             sr_index = sr.index if isinstance(sr, pd.Series) else list(sr.keys())
             df = pd.DataFrame(index=self.dates, columns=sr_index)
             for idx in sr_index:
@@ -80,7 +80,7 @@ class Backtest:
             sr = df
             sr = sr.melt(var_name='group', value_name='value', ignore_index=False).set_index('group', append=True)
             sr = sr['value']
-        elif isinstance(sr, pd.Series) and sr.index.ndim > 1:
+        elif isinstance(sr, pd.Series) and isinstance(sr.index, pd.MultiIndex):
             value_name = sr.name
             col_name = sr.index.names[-1]
             sr = sr.reset_index().pivot(index='date', columns=col_name, values=value_name)
@@ -139,7 +139,11 @@ class Backtest:
             is_rebalance = self.is_rebalance(holding_count, rebalance_period)
             if is_rebalance:
                 # 调仓日，生成组合
-                tmp_factors = self.factors.loc[dt]
+                try:
+                    tmp_factors = self.factors.loc[dt]
+                except KeyError:
+                    print(f'missing factor data in {dt}')
+                    continue
                 tmp_group = self.group.loc[dt] if self.group is not None else None
                 tmp_group_weight = self.group_weight.loc[dt] if self.group_weight is not None else None
                 tmp_factor_weight = self.factor_weight.loc[dt] if self.factor_weight is not None else None

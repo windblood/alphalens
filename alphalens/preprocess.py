@@ -234,7 +234,7 @@ def residual_factor(factor, base_factors):
     with ProcessPoolExecutor(max_workers=4) as pool:
         jobs = []
         for dt in dates:
-            tmp_factor = factor.loc[dt].fillna(value=0)
+            tmp_factor = factor.loc[dt].dropna()  # 剔除NA的证券
             tmp_base = base_factors.loc[dt].reindex(tmp_factor.index).fillna(value=0)
             future = pool.submit(get_residual, tmp_factor, tmp_base, dt)
             jobs.append(future)
