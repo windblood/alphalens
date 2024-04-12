@@ -253,7 +253,7 @@ def backtests_report(cfg):
     groupby = cfg.get('groupby', False)
     if groupby:
         groupby = dataloader.get_stock_industry(start_dt=start_date, end_dt=end_date)
-        groupby.set_index(['date', 'group'], inplace=True)
+        groupby.set_index(['date', 'code'], inplace=True)
     else:
         groupby = None
 
