@@ -202,7 +202,8 @@ class Backtest:
             tmp_group = group[group == grp]
             tmp_factor = factors.reindex(tmp_group.index)   # nan process
             tmp_score = tmp_factor.rank(pct=True)
-            weighted_score = pd.Series(tmp_score.values @ factor_weight.values, index=tmp_score.index)
+            tmp_factor_weight = factor_weight.reindex(tmp_score.columns)
+            weighted_score = pd.Series(tmp_score.values @ tmp_factor_weight.values, index=tmp_score.index)
             tmp_selection = weighted_score.sort_values().index[:topk]
             tmp_group_weight = group_weight if isinstance(group_weight, (int, float)) else group_weight.loc[grp]
             tmp_weights = tmp_group_weight / topk
