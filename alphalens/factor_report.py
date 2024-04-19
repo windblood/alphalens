@@ -226,7 +226,7 @@ def alphas_report(cfg):
 
 
 def analyze_account(account):
-    """ TODO: account analysis based on empyrical """
+    """ account analysis based on empyrical """
     df = pd.DataFrame(account).set_index('date')[['asset']]
     nav = df['asset'] / df['asset'].iloc[0]
     returns = df['asset'].pct_change()

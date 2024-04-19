@@ -35,7 +35,7 @@ def save_pickle(file, accounts):
     return None
 
 def market_value(port_dict, price_dict):
-    value = sum([vol*price_dict[stk] for stk, vol in port_dict.items()])
+    value = sum([vol*price_dict.get(stk, 0) for stk, vol in port_dict.items()])
     return value
 
 
@@ -64,12 +64,12 @@ class Backtest:
         date_range = self.dates[[0, -1]].astype(str).to_list()
         self.initial_asset = kwargs.get('initial_asset', 10000000)
 
-        self.group = self.fill_dates(group)  # 按self.dates填充group、group_weight、factor_weight
+        self.group = self.fill_dates(group, ffill=False, bfill=False)  # 按self.dates填充group、group_weight、factor_weight
         self.group_weight = self.fill_dates(group_weight)
         self.factor_weight = self.fill_dates(factor_weight)
         self.name = '_'.join(self.factors.columns.to_list() + date_range)
 
-    def fill_dates(self, sr):
+    def fill_dates(self, sr, ffill=True, bfill=True):
         if sr is None:
             return None
         if isinstance(sr, dict) or (isinstance(sr, pd.Series) and (not isinstance(sr.index, pd.MultiIndex))):
@@ -84,7 +84,11 @@ class Backtest:
             value_name = sr.name
             col_name = sr.index.names[-1]
             sr = sr.reset_index().pivot(index='date', columns=col_name, values=value_name)
-            sr = sr.reindex(self.dates).ffill().bfill()
+            sr = sr.reindex(self.dates)
+            if ffill:
+                sr = sr.ffill()
+            if bfill:
+                sr = sr.bfill()
             sr = sr.melt(var_name=col_name, value_name=value_name, ignore_index=False).set_index(col_name, append=True)
             sr = sr[value_name]
         else:
@@ -151,10 +155,11 @@ class Backtest:
                 portfolio_weight = self.gen_portfolio(tmp_factors, tmp_prices, tmp_group,
                                                tmp_group_weight, tmp_factor_weight, pre_account)
 
-                portfolio = {stk: round(pre_asset*(1-cost*2)*wgt/prices_dict[stk], -2)
+                portfolio = {stk: round(pre_asset*(1-cost*2)*wgt/prices_dict.get(stk, np.inf), -2)
                              for stk, wgt in portfolio_weight.items()}
+                portfolio = {stk: shr for stk, shr in portfolio.items() if 1<=shr<=100000000}
                 trades = gen_trades(pre_portfolio, portfolio)
-                fee = sum([abs(vol) * prices_dict[stk]*cost for stk, vol in trades.items()])
+                fee = sum([abs(vol) * prices_dict.get(stk, 0)*cost for stk, vol in trades.items()])
                 mkt_value = market_value(portfolio, prices_dict)
                 cash = pre_cash + old_mkt_value - fee - mkt_value
             else:
