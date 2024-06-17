@@ -289,6 +289,49 @@ def backtests_report(cfg):
     return perfs
 
 
+def backtests_report_by_industry(cfg):
+    if 'start_date' not in cfg:
+        raise KeyError()
+
+    start_date = cfg['start_date']
+    end_date = cfg.get('end_date', date.today())
+
+    loader = cfg.get('loader', 'mysql')
+    loader_cls = loaders.get(loader, MysqlLoader)
+
+    kwargs = cfg.copy()
+    dataloader = loader_cls(**kwargs)
+
+    bench_factors = cfg.get('bench_factors', config.style_factors)
+
+    groupby = dataloader.get_stock_industry(start_dt=start_date, end_dt=end_date)
+    groupby = groupby.set_index(['date', 'code']).iloc[:, 0]
+
+    bench_factors = dataloader.get_factor_data(bench_factors, start_dt=start_date, end_dt=end_date)
+    bench_factors = bench_factors.groupby(level='code').ffill()
+    prices = dataloader.get_stock_price(start_dt=start_date, end_dt=end_date)
+    prices['date'] = pd.to_datetime(prices['date'].astype(str))
+
+    perfs = {}
+    factors = list_factors()
+
+    for factor_name in tqdm(factors):
+        target_factor = load_factor(factor_name, start_date, end_date)
+        target_factor = target_factor.groupby(level='code').ffill()
+        for sgn in [1, -1]:
+            factor_weight = {factor_name: sgn}
+            inds = groupby.unique()
+            for ind in inds:
+                tmp_grps = groupby[groupby==ind]
+                tmp_stks = tmp_grps.index.get_level_values('code').unique()
+                tmp_factor = target_factor[target_factor.index.get_level_values('code').isin(tmp_stks)]
+                tmp_prices = prices[prices['code'].isin(tmp_stks)]
+                factor_bt = Backtest(factors=tmp_factor, prices=tmp_prices, group=tmp_grps, group_weight=None,
+                                     factor_weight=factor_weight, initial_asset=10000000)
+                factor_bt.run()
+                perfs[factor_name] = analyze_account(factor_bt.accounts)
+    return perfs
+
 
 if __name__ == '__main__':
     cfg = {'factor_name': 'beta', 'start_date': '20220101', 'end_date': '20240331',
