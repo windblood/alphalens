@@ -6,11 +6,8 @@ from typing import Callable, Dict, List, Tuple, Union
 import numpy as np
 import pandas as pd
 
-
-from analyzer.plot_utils import _use_chinese, plotting_by_streamlit, plotting_in_grid
-from analyzer.prepare import get_clean_factor_and_forward_returns
-from analyzer.streamlit_analyze import FactorAnalyzer
-from analyzer.utils import convert_to_forward_returns_columns, ensure_tuple
+from alphalens.utils import get_clean_factor_and_forward_returns
+from .analyzer import FactorAnalyzer
 
 
 class TopKAnalyzer(FactorAnalyzer):
@@ -96,8 +93,8 @@ class TopKAnalyzer(FactorAnalyzer):
 
 
 if __name__ == '__main__':
-    from data_service import MysqlLoader
-    from streamlit_analyze import create_full_tear_sheet
+    from alphalens.loader import MysqlLoader
+    from alphalens.tears import create_full_tear_sheet
     loader = MysqlLoader(host='localhost', port='3306', username='wingtrade',
                          password='wingtrade123', db='factor')
     factor_list = loader.factor_name_list
